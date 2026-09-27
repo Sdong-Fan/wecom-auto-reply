@@ -30,6 +30,7 @@ KB_SRC = ROOT / "data" / "qdrant"                       # 资料库索引
 DEMO_SRC = ROOT / "data" / "chat_raw"                   # 资料库原始文件（示例资料）
 PROMPTS_SRC = ROOT / "prompts"                          # 提示词
 PROFILES_SRC = ROOT / "profiles"                        # 窗口标定
+DOCS_DIR = ROOT / "docs"                                # 详细使用说明的来源（单一源头）
 
 # 要复制的"内容型资产"白名单（测试会检查它不含客户数据）
 CONTENT_SOURCES = (KB_SRC, DEMO_SRC, PROMPTS_SRC, PROFILES_SRC)
@@ -46,7 +47,7 @@ RUNTIME_DIRS = ("data/chat_raw/uploaded", "data/context", "data/pending",
 NEVER_SHIP = ("data/context", "data/state", "data/learned", "data/pending",
               "logs", ".env")
 
-USAGE_TXT = """企业微信智能客服机器人 —— 使用说明
+USAGE_TXT = """企业微信智能客服机器人 —— 使用说明（简版）
 ================================================
 
 【系统要求】
@@ -55,9 +56,12 @@ USAGE_TXT = """企业微信智能客服机器人 —— 使用说明
 【第一次使用（4 步）】
   1. 双击「启动.bat」
   2. 界面右上「设置」→ 填模型接口（API Key / 接口地址 / 模型名）→ 保存
-     （不填 Key 也能开，但机器人答不了话，只会把消息转「待人工」）
-  3. 设置里选「企业微信 · 截图模式」，然后打开企业微信 PC 版并**登录**
+     （不填 Key 也能开，但机器人答不了话，只会把消息转「待人工」、不外发任何内容）
+  3. 设置里选「企业微信 · 截图模式」，然后打开企业微信 PC 版并登录
   4. 界面点「开始」→ 之后它只处理**开始之后**收到的新消息
+
+  ★ 更详细的步骤（含排错、API 模式、资料库用法）见同目录：
+     使用说明-详细.md   （推荐先扫一眼「常见问题」那一节）
 
 【资料库（你的业务知识）】
   已内置一份示例资料（相机租赁）供你试跑。
@@ -179,8 +183,16 @@ def copy_extras():
     _copy_tree(PROFILES_SRC, DIST / "profiles", "窗口标定 profiles/")
 
     # ④ 给使用者看的说明
+    #    简版 txt 给"解压就想用"的人；详细版直接复制仓库里的 docs/使用说明.md
+    #    —— 单一源头：改文档只改那一份，打包自动带上，不会两处不一致。
     (DIST / "使用说明.txt").write_text(USAGE_TXT, encoding="utf-8")
     print("   已写 使用说明.txt")
+    detail = DOCS_DIR / "使用说明.md"
+    if detail.exists():
+        shutil.copy2(detail, DIST / "使用说明-详细.md")
+        print("   已复制 使用说明-详细.md（来自 docs/使用说明.md）")
+    else:
+        print("   [警告] 缺少 docs/使用说明.md，包里只有简版说明")
 
 
 def privacy_gate():
@@ -200,7 +212,8 @@ def privacy_gate():
 def verify():
     print("[5/6] 校验包体完整性")
     required = ["启动.exe", "启动.bat", "setup.bat", "config.json", ".env.example",
-                "使用说明.txt", "prompts/system.md", "profiles/wecom.json",
+                "使用说明.txt", "使用说明-详细.md",
+                "prompts/system.md", "profiles/wecom.json",
                 "data/qdrant/meta.json",
                 "data/qdrant/collection/knowledge_base/storage.sqlite"]
     missing = [f for f in required if not (DIST / f).exists()]

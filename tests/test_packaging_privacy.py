@@ -66,6 +66,16 @@ def test_build_copies_content_assets():
     assert "NEVER_SHIP" in BUILD_RAW
 
 
+def test_build_ships_detailed_usage_from_docs():
+    """详细说明只有一份源头：docs/使用说明.md，打包时复制进包（别两处各写一份）。"""
+    assert "DOCS_DIR" in BUILD_RAW
+    assert "使用说明.md" in BUILD_RAW, "打包应复制 docs/使用说明.md"
+    assert "使用说明-详细.md" in BUILD_RAW, "包内文件名要能对上（简版里也引用了它）"
+    assert "使用说明-详细.md" in BUILD_RAW.split("def copy_extras")[0], \
+        "简版 USAGE_TXT 里要提到详细版，用户才知道还有更全的"
+    assert (ROOT / "docs" / "使用说明.md").is_file(), "详细说明必须存在于仓库"
+
+
 def test_usage_txt_mentions_privacy_and_key():
     assert "使用说明" in BUILD_RAW
     assert "API Key" in BUILD_RAW, "使用说明要告诉对方怎么填自己的 Key"

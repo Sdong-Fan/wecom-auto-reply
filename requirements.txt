@@ -1,0 +1,59 @@
+# 依赖清单（Python 3.10 ~ 3.12，Windows）
+#
+# 安装：
+#     python -m venv .venv
+#     .venv\Scripts\activate
+#     pip install -r requirements.txt
+#
+# 想省 2GB 磁盘：torch 装 CPU 版（本项目不用 GPU）：
+#     pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# tkinter 是 Python 自带的（Windows 官方安装包默认包含），不需要 pip 安装。
+
+# ── OCR：默认后端 RapidOCR(ONNX)，离线可用 ──────────────────────────
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.30.0
+opencv-python==4.11.0.86
+pillow==12.3.0
+numpy==1.26.4
+
+# ── 向量检索 + 本地嵌入模型（bge-small-zh-v1.5）────────────────────
+qdrant-client==1.12.2
+sentence-transformers==3.4.1
+transformers==4.57.6
+torch==2.14.0
+huggingface_hub==0.36.2
+
+# ── LLM（任意 OpenAI 兼容接口：DeepSeek / 通义 / 本地 vLLM…）──────
+openai==1.59.2
+httpx==0.28.1
+python-dotenv==1.0.1
+
+# ── Windows 桌面自动化（截图 / 键鼠 / 窗口）────────────────────────
+pywin32==312
+pynput==1.8.2
+mss==10.2.0
+psutil==7.2.2
+
+# ── 资料库上传：Excel / Word 解析 ──────────────────────────────────
+openpyxl==3.1.5
+xlrd==2.0.2
+python-docx==1.2.0
+
+# ── 企业微信「客服 API」模式（可选，截图模式用不到）────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pycryptodome==3.21.0
+defusedxml==0.7.1
+redis==5.2.1
+
+# ── 开发 / 测试 ───────────────────────────────────────────────────
+pytest==8.3.4
+pytest-asyncio==0.25.0
+
+# ── 打包成 exe（可选，只在要打包时用）──────────────────────────────
+pyinstaller==6.22.3
+
+# ── 可选：PaddleOCR 作为 OCR 回退后端（默认不用；约 +2GB）──────────
+# paddleocr==2.10.0
+# paddlepaddle==3.0.0

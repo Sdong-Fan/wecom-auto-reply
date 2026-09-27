@@ -1,0 +1,90 @@
+# ── 密钥（只提交 .env.example）────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── 本地私密名单：客户姓名 / 自己的 IP / 凭据（自检脚本会读它）────
+.privacy_needles
+
+# ── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# ── 虚拟环境 ─────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── 客户数据 / 运行时状态（**绝不能提交**）────────────────────────
+data/context/*
+data/state/*
+data/learned/
+data/pending/*
+data/unanswered.json
+data/kb_history*.jsonl
+data/heartbeat.txt
+data/watchdog.pid
+data/test_*
+data/.escalation_state.json
+data/chat_raw/*
+data/videos/*
+data/qdrant/*
+# 空目录占位
+!data/chat_raw/.gitkeep
+!data/videos/.gitkeep
+!data/qdrant/.gitkeep
+!data/pending/.gitkeep
+
+# ── 日志（含客户消息原文）────────────────────────────────────────
+logs/
+*.log
+
+# ── 窗口标定的个人副本（模板要提交）──────────────────────────────
+profiles/*.local.json
+
+# ── 大模型文件（首次运行会自动放到 bge_model/）────────────────────
+bge_model/
+models/
+whisper_models/
+*.bin
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# ── 面试准备材料（个人向；想让仓库包含它就删掉这行）──────────────
+docs/面试冲刺/
+
+# ── 备份 / 临时文件 ──────────────────────────────────────────────
+*.bak
+*.backup
+*.tmp
+*.temp
+_*.py
+debug_*.png
+debug_*.txt
+debug/2*/
+debug/latest/
+debug/__pycache__/
+
+# ── 工具产物 ─────────────────────────────────────────────────────
+.superpowers/
+.gstack/
+.claude/settings.local.json
+.claude/settings.json
+node_modules/
+package-lock.json
+
+# ── 系统文件 ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 任意后缀的备份（.bak / .bak2 / .bak3 …）
+*.bak*

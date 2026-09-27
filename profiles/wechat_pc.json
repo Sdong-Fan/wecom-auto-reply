@@ -1,0 +1,90 @@
+{
+  "_comment": "由 scripts/calibrate_chat_app.py 自动标定；手改后请重跑自检",
+  "name": "微信PC",
+  "mode": "screenshot",
+  "window": {
+    "process_names": [
+      "Weixin.exe"
+    ],
+    "window_class": "Qt51514QWindowIcon",
+    "min_title_length": 1,
+    "title_hint": "微信",
+    "prefer_title": "微信"
+  },
+  "layout": {
+    "list_x": 0,
+    "list_w": 462,
+    "chat_x": 462,
+    "chat_w": 978,
+    "chat_top_margin_px": 90,
+    "chat_bottom_margin_px": 226,
+    "_row_comment": "以下为实测值（微信 PC 1458x1738）。行几何必须用绝对像素：比例会随窗口高度飘，实测按比例算每行偏 4px、第 5 行偏 29px，结果用 A 的名字去回复 B 的内容。",
+    "list_start_y_px": 139,
+    "row_height_px": 98,
+    "max_scan_rows": 6,
+    "name_row_x_from_ratio": 0.2,
+    "name_row_x_to_ratio": 1.0
+  },
+  "bubbles": {
+    "my_side_rule": "color",
+    "my_color_rgb": [
+      157,
+      242,
+      159
+    ],
+    "my_color_tolerance": 20,
+    "min_uniformity": 0.45,
+    "min_contrast": 150
+  },
+  "calibrated": {
+    "at": "2026-09-24 23:48:25",
+    "window_size": [
+      1458,
+      1737
+    ],
+    "selfcheck": "见标定时终端输出"
+  },
+  "customers": {
+    "_comment": "微信 PC 里不存在 @微信 后缀（那是'微信用户加了企业微信'才有的），所以用排除法：不是系统号/群聊就算客户",
+    "name_rule": "any",
+    "exclude_keywords": [
+      "文件传输助手",
+      "微信团队",
+      "微信支付",
+      "微信游戏",
+      "微信运动",
+      "服务通知",
+      "服务号",
+      "订阅号",
+      "公众号",
+      "腾讯新闻",
+      "微信收款助手",
+      "零钱",
+      "群聊",
+      "折叠的群聊",
+      "群通知"
+    ],
+    "require_whitelist": false,
+    "whitelist": [],
+    "_whitelist_comment": "白名单现在是**可选**的额外过滤：留空＝不启用（靠 only_new_messages 就够）；填了就只处理名单里的会话。"
+  },
+  "dispatch": {
+    "_comment": "个人微信只进「待人工」，不自动发送：连'稍等'占位语都不发。发错话到个人微信不可逆，代价远大于企业微信客服。",
+    "allow_auto_send": false
+  },
+  "detection": {
+    "red_dot": {
+      "_comment": "微信个人号里红头像/红图标会被企业微信的红点规则误判成未读，所以关掉红点路径，只靠兜底扫描 + 客户白名单。",
+      "enabled": false
+    }
+  },
+  "scan": {
+    "_comment": "只处理『点开始之后』收到的新消息：首次扫描把当前会话列表整份记成基线，之后只有内容变化的会话才会被点开。这样不用维护白名单，也不会去翻你以前的聊天记录。",
+    "only_new_messages": true,
+    "dynamic_rows": true,
+    "list_top_skip_px": 136,
+    "_dynamic_comment": "微信会话行高不固定（预览两行时那行变高），必须按图像实际切分，不能用固定 row_height。list_top_skip_px 跳过顶部搜索框。",
+    "row_x_from_ratio": 0.28,
+    "row_x_to_ratio": 0.92
+  }
+}

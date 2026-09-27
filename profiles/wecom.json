@@ -1,0 +1,46 @@
+{
+  "_comment": "由 scripts/calibrate_chat_app.py 自动标定；手改后请重跑自检",
+  "name": "企业微信",
+  "mode": "screenshot",
+  "window": {
+    "process_names": [
+      "WXWork.exe",
+      "wxwork.exe"
+    ],
+    "window_class": "WeWorkWindow",
+    "min_title_length": 2,
+    "title_hint": "企业微信"
+  },
+  "layout": {
+    "list_x": 0,
+    "list_w": 465,
+    "chat_x": 464,
+    "chat_w": 1012,
+    "chat_top_margin_px": 100,
+    "chat_bottom_margin_px": 240,
+    "col1_width_px": 100,
+    "_col1_comment": "左侧导航图标栏宽度，截图时跳过；量不出来，企业微信已知 100",
+    "_measured_top_margin_px": 90,
+    "_measured_bottom_margin_px": 230,
+    "_align_comment": "这三个值刻意钉成与 config.json 完全一致：标定器量到的是 465/3/单进程名，但现网跑通的是 464/2/两个进程名，先保证零差异，日后再单独立项调整。"
+  },
+  "bubbles": {
+    "my_side_rule": "color",
+    "my_color_rgb": [
+      201,
+      231,
+      255
+    ],
+    "my_color_tolerance": 20,
+    "min_uniformity": 0.45,
+    "min_contrast": 150
+  },
+  "calibrated": {
+    "at": "2026-09-24 22:45:23",
+    "window_size": [
+      2019,
+      1728
+    ],
+    "selfcheck": "见标定时终端输出"
+  }
+}

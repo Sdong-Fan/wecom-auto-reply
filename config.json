@@ -1,0 +1,255 @@
+{
+  "_comment": "企业微信智能客服 — 主配置文件",
+  "check_interval_seconds": 3,
+  "reply_cooldown_seconds": 5,
+  "send_target_verify": "lenient",
+  "kb": {
+    "_comment": "知识库/资料库相关设置",
+    "history_versions": 5,
+    "keep_uploaded_copy": true,
+    "extract_confirm": "batch",
+    "learn": {
+      "enabled": true,
+      "max_items": 50,
+      "_comment": "从人工改稿学习：enabled=总开关；max_items=每类最多留多少条（超出丢最旧）"
+    }
+  },
+  "_send_target_verify_comment": "发送前\"确认当前打开的就是目标会话\"的校验强度：strict=名字必须完整包含；lenient=允许 OCR 错一两个字（按字符命中率 ≥0.75）；off=不校验（省 1~2 秒，但会失去防发错人）。",
+  "error_retry_delay_seconds": 3,
+  "wecom": {
+    "process_names": [
+      "WXWork.exe",
+      "wxwork.exe"
+    ],
+    "window_class": "WeWorkWindow",
+    "min_title_length": 2,
+    "min_window_width": 200,
+    "min_window_height": 200,
+    "off_screen_threshold": -1000,
+    "restore_position": [
+      100,
+      100
+    ],
+    "title_hint": "企业微信"
+  },
+  "columns": {
+    "col1_width_px": 100,
+    "col2_width_px": 364,
+    "col1_width_ratio": 0.0701,
+    "col2_width_ratio": 0.26,
+    "boundary_strip_width": 100,
+    "boundary_scan_start_ratio": 0.2,
+    "boundary_scan_end_ratio": 0.8,
+    "boundary_search_limit": 80,
+    "boundary_strong_threshold": 99999,
+    "boundary_weak_threshold": 99999
+  },
+  "crop": {
+    "chat_area": {
+      "top_margin_px": 100,
+      "bottom_margin_px": 240,
+      "right_margin_ratio": 0.3,
+      "top_crop_ratio": 0.12,
+      "bottom_crop_ratio": 0.7
+    },
+    "name_row": {
+      "top_offset": -16,
+      "bottom_offset": 56
+    },
+    "click_position": {
+      "col2_row_x_ratio": 0.333,
+      "input_box_x_ratio": 0.333,
+      "input_box_bottom_offset": 60,
+      "scroll_center_x_ratio": 0.5,
+      "scroll_center_y_ratio": 0.5
+    }
+  },
+  "detection": {
+    "red_dot": {
+      "scan_width_ratio": 0.05,
+      "scan_width_min_px": 20,
+      "r_min": 90,
+      "r_max": 220,
+      "gb_max": 130,
+      "min_pixels": 2,
+      "red_excess_g": 20,
+      "red_excess_b": 20,
+      "cluster_gap": 5,
+      "cluster_min_points": 2
+    },
+    "blue_bubble": {
+      "b_excess_r": 15,
+      "min_rgb": 140,
+      "row_threshold_ratio": 0.06,
+      "right_edge_ratio": 0.85,
+      "max_height_ratio": 0.15,
+      "scan_top_limit_ratio": 0.05,
+      "scan_bottom_start_ratio": 0.15
+    },
+    "gray_bubble": {
+      "max_channel_diff": 10,
+      "r_range": [
+        190,
+        242
+      ],
+      "g_range": [
+        190,
+        242
+      ],
+      "b_range": [
+        190,
+        242
+      ],
+      "row_threshold_ratio": 0.15,
+      "left_edge_ratio": 0.15,
+      "max_height_ratio": 0.8,
+      "min_height_px": 20,
+      "scan_top_limit_ratio": 0.05,
+      "nickname_top_offset": 5
+    },
+    "green_badge": {
+      "min_green": 100,
+      "green_excess_ratio": 1.3,
+      "min_green_pixels": 10
+    },
+    "name_region": {
+      "text_rgb_threshold": 100,
+      "min_dark_pixels": 3,
+      "width_change_ratio": 0.5,
+      "min_width_ratio": 0.15,
+      "min_height_px": 5,
+      "crop_padding_left": 20,
+      "crop_padding_right": 20,
+      "crop_padding_top": 1,
+      "crop_padding_bottom": 2
+    },
+    "bubble": {
+      "blue": {
+        "my_rgb": [
+          201,
+          231,
+          255
+        ],
+        "my_tolerance": 20
+      }
+    }
+  },
+  "ocr": {
+    "engine": "paddleocr",
+    "lang": "ch",
+    "min_image_height": 50,
+    "enhance_contrast": false,
+    "contrast_factor": 2.0,
+    "customer_name_suffixes": [
+      "@微信",
+      ")微信"
+    ],
+    "customer_name_pattern": "@[一-鿿]{2,}",
+    "timestamp_filter_pattern": "^[\\d:;.\\-\\s]+$",
+    "non_customer_keywords": [
+      "行业资讯",
+      "企业微信日报",
+      "系统通知",
+      "工作通知",
+      "日程提醒",
+      "待办提醒",
+      "会议邀请",
+      "打卡提醒",
+      "审批通知",
+      "汇报通知",
+      "公告通知",
+      "此群为",
+      "群公告",
+      "群成员",
+      "全员群",
+      "群聊",
+      "加入了群",
+      "退出了群",
+      "邀请你加入"
+    ],
+    "stop_reply_keywords": [
+      "不要重复",
+      "不要回",
+      "别发了",
+      "别再发",
+      "停止回复",
+      "不要再发",
+      "别回复",
+      "不要回复",
+      "别回了",
+      "不要发了",
+      "停下"
+    ],
+    "backend": "rapidocr"
+  },
+  "ocr_confidence": {
+    "name_detection": 0.05,
+    "bubble_text": 0.15,
+    "default": 0.4
+  },
+  "dedup": {
+    "col2_hash_cache_size": 50,
+    "click_cooldown_seconds": 60,
+    "fallback_click_cooldown_seconds": 120
+  },
+  "timing": {
+    "focus_restore_delay": 0.3,
+    "click_before_delay": 0.1,
+    "after_click_row_delay": 1.2,
+    "after_scroll_delay": 0.5,
+    "after_click_input_delay": 0.3,
+    "fallback_after_click_delay": 1.0,
+    "fallback_after_scroll_delay": 0.3
+  },
+  "fallback": {
+    "start_y_ratio": 0.0747,
+    "row_height_px": 94,
+    "max_scan_rows": 6
+  },
+  "logging": {
+    "level": "INFO",
+    "log_file": "logs/monitor.log"
+  },
+  "debug": {
+    "save_screenshots": true,
+    "output_dir": "debug",
+    "max_history": 10
+  },
+  "ai": {
+    "provider": "deepseek",
+    "model": "deepseek-chat"
+  },
+  "rag": {
+    "high_confidence_threshold": 0.55,
+    "_high_confidence_threshold_comment": "自动发门槛：检索分高于它才直接发给客户。0.65→0.55 是 2026-09-27 用 46 题评测集扫了 7 个值定的：0.55 能多自动答 5 题、危险直发仍然 0；≤0.40 时开始出现「语义不明的话被自动答出去」（scripts/threshold_scan.py）",
+    "low_confidence_threshold": 0.4,
+    "allow_auto_send": true
+  },
+  "capture": {
+    "_comment": "native_window=True: PrintWindow 抓窗口 + PostMessage 点击，全程不抢前台（docs/探针-采集方式.md）。发送仍走前台。",
+    "native_window": true,
+    "grab_cache_ms": 40,
+    "post_click_hold_ms": 60
+  },
+  "channel": "screenshot",
+  "api": {
+    "_comment": "channel=wecom_api 时走企业微信微信客服官方接口（无需桌面端、不截图）。凭据在 .env：WECOM_CORP_ID/WECOM_KF_SECRET/WECOM_OPEN_KFID。",
+    "wecom": {
+      "open_kfid": "",
+      "state_path": "data/state/wecom_kf.json",
+      "timeout_seconds": 20,
+      "poll_interval_seconds": 3
+    }
+  },
+  "profile": "wecom",
+  "seen_message_ttl_seconds": 86400,
+  "_seen_message_ttl_comment": "「这条已经回过」记多久（秒）。回过就不再回，默认 24 小时；重启也不忘。只作用于「已经有人回过」的气泡。",
+  "unreplied_dedup_seconds": 600,
+  "_unreplied_dedup_comment": "「还没回过」的气泡只在这个短窗口内去重（秒）。客户隔一阵子又问同一句话要能正常回答 —— 长窗口用在这里会漏答，漏答比重复回严重。",
+  "welcome": {
+    "on_enter_session": true,
+    "on_first_contact": true,
+    "cooldown_seconds": 21600,
+    "_comment": "on_enter_session=API模式：客户进入会话时自动发欢迎语（截图模式做不到这个）；on_first_contact=两种模式通用：第一次跟某个客户说话前先招呼一句；cooldown_seconds=API模式同一人多久内只招呼一次。文案在 知识库→提示词→欢迎语"
+  }
+}

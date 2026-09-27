@@ -1,0 +1,40 @@
+{
+  "_comment": "微信 PC 标定模板 —— 占位，不是可用 profile。文件名故意是 .template，load_profile 不会加载它。",
+  "_how_to_use": [
+    "1) 先装好微信 PC 并登录（本机当前没装）。",
+    "2) 跑：python scripts/calibrate_chat_app.py --name 微信PC --id wechat_pc --process Weixin.exe --title 微信",
+    "3) 看它打印的自检：me 是不是你自己发的、other 是不是对方发的。",
+    "4) 确认无误后它会写出 profiles/wechat_pc.json，再把 config.json 的 profile 改成 wechat_pc。",
+    "5) 若 PrintWindow 出黑帧（微信 4.x 是 GPU 合成窗口，jev 实测过这个风险），",
+    "   标定器会报'抓图质量'异常，需要改用 Windows Graphics Capture（pip install windows-capture）。"
+  ],
+  "name": "微信PC",
+  "mode": "screenshot",
+  "window": {
+    "_source": "jev-chat-windows docs/KICKOFF.md：目标窗口 Weixin.exe / 类 Qt51514QWindowIcon / 标题「微信」",
+    "_pick_rule": "同进程还有 'Weixin' 工具窗、'图片和视频' 看图窗，面积可能比主窗口大 —— 所以按标题「微信」挑，不按面积",
+    "process_names": ["Weixin.exe", "WeChat.exe"],
+    "window_class": "Qt51514QWindowIcon",
+    "min_title_length": 1,
+    "prefer_title": "微信"
+  },
+  "layout": {
+    "_comment": "以下全部需要实测标定，这里只是占位。企业微信实测值是 chat_x=465 / 上边距 100 / 下边距 240，微信肯定不同。",
+    "list_x": 0,
+    "list_w": 0,
+    "chat_x": 0,
+    "chat_w": 0,
+    "chat_top_margin_px": 0,
+    "chat_bottom_margin_px": 0,
+    "col1_width_px": 0
+  },
+  "bubbles": {
+    "_comment": "微信 PC 我方气泡是绿色（大约 RGB 149,236,105，深浅主题会变），标定器会自动量；这里先留空。",
+    "my_side_rule": "color",
+    "my_color_rgb": [],
+    "my_color_tolerance": 20,
+    "min_uniformity": 0.45,
+    "min_contrast": 150
+  },
+  "unverified": true
+}

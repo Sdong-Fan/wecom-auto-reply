@@ -110,24 +110,32 @@ python -m venv .venv
 pip install -r requirements.txt
 #   想省磁盘：pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-# 2. 配置：复制模板，填自己的模型 Key
+# 2. 准备本地嵌入模型（fresh clone 必做，否则启动会报错）
+python scripts/prepare_model.py      # 从 hf-mirror 下载 bge-small-zh，约 92MB
+
+# 3. 配置：复制模板，填自己的模型 Key
 copy .env.example .env
 notepad .env        # 至少填 LLM_API_KEY（支持 DeepSeek / 通义 / 本地 vLLM 等任意 OpenAI 兼容接口）
 
-# 3. 启动
+# 4. 启动
 python main.py
 ```
 
 也可以用 `启动.bat`（会自动建目录、检查 `.env`，源码模式与打包模式都能启动）。
 
-### 首次使用 4 步
+### 上手 6 步（详细版见 [`docs/使用说明.md`](docs/使用说明.md)）
 
-1. 界面右上「**设置**」→ 填模型接口（API Key / 地址 / 模型名）→ 保存
-2. 设置里选「**企业微信 · 截图模式**」，打开企业微信 PC 版并登录
-3. 点「**开始**」——只处理**开始之后**收到的新消息（不翻旧账）
-4. 到「知识库」上传你的业务资料 → 重建索引 → 「试问一句」验证
+| 步骤 | 做什么 | 要点 |
+|---|---|---|
+| 1 | 装依赖 + 准备嵌入模型 | `pip install -r requirements.txt` → `python scripts/prepare_model.py` |
+| 2 | **接 LLM API**（关键第一步） | 界面「设置」填 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`；**不填也能开**，但只转人工、不外发 |
+| 3 | 选接入方式 | 「企业微信 · 截图模式」零门槛；微信 PC 需先 `python scripts/calibrate_chat_app.py` 标定 |
+| 4 | 打开客户端 → 点「开始」 | 只处理**开始之后**收到的新消息（不翻旧账） |
+| 5 | 上传业务资料 → 重建索引 | txt / md / csv / Excel / Word；先用 `examples/kb_demo/` 试跑 |
+| 6 | 到「试问一句」验证 | 顺便确认模型 Key 通了；答不准就先补资料，再考虑改提示词 |
 
-> 微信 PC 版需要先标定：`python scripts/calibrate_chat_app.py` 生成 `profiles/wechat_pc.json`。
+> 排错先看 `logs/monitor.log`；常见问题（闪退 / 401 / 找不到窗口 / 老是转人工）见
+> [`docs/使用说明.md`](docs/使用说明.md) §9。
 
 ---
 
@@ -246,6 +254,7 @@ tests/                  1178 个测试
 
 | 文档 | 内容 |
 |---|---|
+| [`docs/使用说明.md`](docs/使用说明.md) | **从零到能自动回复**：装依赖 → 准备模型 → **接 LLM API** → 选模式 → 建资料库 → 排错 FAQ |
 | [`PORTFOLIO.md`](PORTFOLIO.md) | **作品集导览**：5 分钟看懂、15 分钟细看顺序、数据口径 |
 | [`docs/GitHub上传.md`](docs/GitHub上传.md) | 推送到 GitHub 的步骤 + 上传前检查清单 + 哪些文件被有意排除 |
 | [`docs/打包与隐私检查.md`](docs/打包与隐私检查.md) | 谁能进包、谁绝不能进包、怎么自检 |

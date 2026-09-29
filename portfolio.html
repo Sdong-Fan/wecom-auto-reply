@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>企业微信自动客服机器人 · 作品集</title>
+<style>
+  :root { --green:#1b5e20; --gray:#666; --line:#e3e6e3; }
+  * { box-sizing: border-box; }
+  body { font-family:"Microsoft YaHei","PingFang SC","Helvetica Neue",Arial,sans-serif;
+         max-width:820px; margin:0 auto; padding:28px 20px 60px; line-height:1.8;
+         color:#222; background:#fff; }
+  h1 { font-size:24px; margin:0 0 6px; }
+  .sub { color:var(--gray); font-size:14px; margin-bottom:22px; }
+  h2 { font-size:17px; color:var(--green); margin:30px 0 8px;
+       border-left:4px solid var(--green); padding-left:10px; }
+  ul { padding-left:22px; margin:6px 0; }
+  li { margin:5px 0; }
+  table { border-collapse:collapse; width:100%; margin:10px 0; font-size:14px; }
+  th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:#f6f8f6; font-weight:600; }
+  code { background:#f4f6f4; padding:1px 5px; border-radius:3px; font-size:13px; }
+  .box { background:#f6f8f6; border:1px solid var(--line); border-radius:6px;
+         padding:12px 16px; margin:14px 0; }
+  .warn { background:#fff8e6; border-color:#f0e0b0; }
+  a { color:#1565c0; word-break:break-all; }
+  .kpi { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
+  .kpi div { flex:1 1 150px; border:1px solid var(--line); border-radius:6px;
+             padding:10px 12px; background:#fafcfa; }
+  .kpi b { display:block; font-size:20px; color:var(--green); }
+  .kpi span { font-size:12px; color:var(--gray); }
+  footer { margin-top:36px; padding-top:14px; border-top:1px solid var(--line);
+           color:var(--gray); font-size:13px; }
+  @media print { body { padding:0; } h2 { page-break-after:avoid; } .noprint { display:none; } }
+</style>
+</head>
+<body>
+
+<h1>企业微信自动客服机器人 · 作品集</h1>
+<p class="sub">产品负责人 / 改造开发 ｜ 个人作品 ｜ 基于开源项目（MIT 许可）改造 ｜ Windows 桌面端</p>
+
+<div class="kpi">
+  <div><b>1.5 秒</b><span>首次响应中位（人工客服通常几十秒起）</span></div>
+  <div><b>43 / 46</b><span>46 题评测集行为符合</span></div>
+  <div><b>0 次</b><span>"该转人工却发出去" & 报错价</span></div>
+  <div><b>1178</b><span>自动化测试（含 4 次事故回归）</span></div>
+</div>
+
+<h2>一句话</h2>
+<ul>
+  <li>给"一个人兼客服的 1–5 人小店"做一套<b>不用改代码就能接入</b>的自动客服：
+      截屏读企业微信消息，<b>只按店主自己上传的资料回答</b>，价格与型号在资料里查不到就转人工，
+      人工改稿确认后它还会学。</li>
+</ul>
+
+<h2>问题（为什么要做）</h2>
+<ul>
+  <li>小店老板绝大多数咨询是重复的：实测真实客户消息 <b>99%（76/77）集中在 7 类问题</b>上
+      （押金/免押、营业时间、机型库存、租赁规则等）。</li>
+  <li>通用客服 SaaS 要么要企业认证 + 开发对接，要么按坐席收费（同类产品客服名额约
+      <b>550 元/客服/年</b>）—— 对一个人看店的小店都不成立。</li>
+  <li>结果：老板一边干活一边手打回复，响应慢一点就丢单。</li>
+</ul>
+
+<h2>目标用户</h2>
+<ul>
+  <li><b>第一优先</b>：1–5 人、店主本人兼客服的小店/工作室（无 IT 支持、拿不到 API 权限、
+      问题重复且答案固定）。</li>
+  <li><b>不做</b>：中大型企业 —— 他们要权限、审计、SLA，选型逻辑完全不同。</li>
+</ul>
+
+<h2>产品与链路</h2>
+<ul>
+  <li>形态：装在本机 Windows 上的桌面端自动客服（不改客户端、不要 API 资质、免安装）。</li>
+  <li>链路：截屏识别新消息 → 判断该不该答 → 检索店主自有资料库 → 生成回复 →
+      <b>三态质量门控</b>（直发 / 降级 / 转人工）→ 待人工工作台改稿后学习 →
+      "最常转人工的问题"排行回流指导补资料，形成闭环。</li>
+  <li>三条关键机制：① 回复中的价格与型号<b>必须在资料库中有出处</b>，否则拦下转人工；
+      ② 越界请求（套取凭据、背诗、算长算式）按模板婉拒；③ 发送前<b>确认会话名</b>防发错人。</li>
+</ul>
+
+<h2>数据与指标</h2>
+<table>
+  <tr><th>类型</th><th>指标</th><th>实测值（口径）</th></tr>
+  <tr><td>北极星</td><td>无人值守解决率</td><td>自动解决 ÷ 全部咨询；决策层面 85% 可直接自动答（89 条决策记录）</td></tr>
+  <tr><td>护栏</td><td>报错价 / 发错人</td><td><b>0 次</b>（编造数字被拦下 4 次、一次都没发出去）</td></tr>
+  <tr><td>过程</td><td>首次响应时长</td><td>中位 <b>1.5 秒</b>（会话记录"收到→发出"时间戳，33 次可配对）</td></tr>
+  <tr><td>过程</td><td>46 题评测集</td><td>行为符合 <b>43/46</b>；"该转人工却发出去" <b>0 次</b></td></tr>
+  <tr><td>成本</td><td>单店月成本</td><td>约 <b>12 元/月</b>（估算：每天 100 条 × 30 天；OCR 与检索本地运行）</td></tr>
+  <tr><td>工程</td><td>自动化测试</td><td><b>1178 个</b>（含 4 次真实事故的根因修复与回归）</td></tr>
+  <tr><td>规模</td><td>真实会话</td><td>自用 + 小范围试用：5 个真实会话 / 77 条客户消息</td></tr>
+</table>
+
+<h2>我的角色</h2>
+<ul>
+  <li>本项目<b>基于开源项目</b> zhu-tingshuai/personal_wxwork_ZTS（MIT 许可）<b>改造</b>：
+      采集层（截图 / 红点 / 气泡 / OCR）与界面框架来自上游，原始版权声明按 MIT 要求完整保留。</li>
+  <li>我负责的五块：① 定义"什么时候不能答"并落地护栏；② 建立评测与指标体系（46 题评测集 + 阈值扫描）；
+      ③ 设计人机学习闭环；④ 发送链路安全；⑤ 交付与隐私（打包隐私门禁、免安装分发）。</li>
+</ul>
+
+<h2>怎么自己跑（3 步）</h2>
+<div class="box">
+  <ol>
+    <li>解压免安装包（Windows，约 1.6GB）→ 双击 <code>启动.bat</code>（首次启动加载模型约 30–90 秒）</li>
+    <li>界面右上「设置」→ 填<b>你自己的</b>模型接口（API Key / 地址 / 模型名）→ 保存</li>
+    <li>选「企业微信 · 截图模式」→ 打开企业微信 PC 版并登录 → 点「开始」</li>
+  </ol>
+  <p style="margin:6px 0 0;font-size:14px;color:#666">
+    不填 Key 也能开：此时机器人不自动回复，只把消息转「待人工」，不向任何地方外发内容。</p>
+</div>
+
+<h2>代码与下载（国内可访问）</h2>
+<div class="box warn noprint">
+  <b>⚠️ GitHub 在国内直连打不开</b>（需要代理）。下面这些链接<b>国内可直接访问</b>：
+</div>
+<table>
+  <tr><th>内容</th><th>国内可直连的地址</th></tr>
+  <tr><td>源码压缩包（小，约几百 KB）</td>
+      <td><a href="https://ghproxy.net/https://github.com/Sdong-Fan/wecom-auto-reply/archive/refs/heads/main.zip">ghproxy 加速下载</a></td></tr>
+  <tr><td>免安装程序（Windows，1607 MB）</td>
+      <td><a href="https://ghproxy.net/https://github.com/Sdong-Fan/wecom-auto-reply/releases/download/v1.0/WeComBot-v1.0-win64.zip">ghproxy 加速下载</a></td></tr>
+  <tr><td>原始仓库（需代理）</td>
+      <td><a href="https://github.com/Sdong-Fan/wecom-auto-reply">github.com/Sdong-Fan/wecom-auto-reply</a></td></tr>
+</table>
+<p style="font-size:13px;color:#666">
+  ghproxy 是第三方 GitHub 加速服务，只做转发，内容与仓库一致；如失效请告知，我另发国内网盘或 Gitee 镜像。
+</p>
+
+<h2>合规说明</h2>
+<ul>
+  <li>本项目通过模拟人工操作控制桌面客户端，请确认符合所在平台服务条款与当地法律。</li>
+  <li>客户聊天记录只存在使用者本机；回答时只把「客户这一句话 + 命中的资料片段」发给使用者自己配置的模型接口。</li>
+</ul>
+
+<footer>
+  本页可直接用浏览器打开；如需 PDF：浏览器 <b>Ctrl+P → 另存为 PDF</b>。<br>
+  更多材料（PRD、评测集说明、事故复盘、使用说明）在仓库 <code>docs/</code> 目录。
+</footer>
+
+</body>
+</html>

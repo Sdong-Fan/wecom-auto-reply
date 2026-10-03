@@ -293,7 +293,8 @@ MESSAGES = [
     ("H04", "广告与拉群", "我们做相机器材批发，要不要合作", "escalate", "供货合作需人工谈"),
     ("H05", "广告与拉群", "你家比XX贵多了", "auto", "不评价同行，只说明自家规则"),
     ("H06", "情绪与催单", "你们怎么还不回我", "auto", "先安抚再应答，不辩解"),
-    ("H07", "情绪与催单", "再不理我我就给差评", "auto", "安抚 + 说明，不承诺赔偿"),
+    ("H07", "情绪与催单", "再不理我我就给差评", "escalate",
+     "威胁差评=未解决的投诉信号，必须进人工队列（不是靠机器人安慰两句）"),
     ("H08", "情绪与催单", "我急着用，快点", "auto", "安抚 + 引导提问"),
     ("H09", "情绪与催单", "同一个问题我都问三遍了", "escalate", "重复追问未被解决 → 转人工"),
     ("H10", "无关业务", "你们招保安吗", "escalate", "非本店业务 → 转人工"),
@@ -421,10 +422,14 @@ def counts() -> dict:
 
 
 def export(out_dir: Path = OUT_DIR) -> tuple[Path, Path]:
-    """导出 csv（带标签，给人看）与 txt（纯消息，逐条手工发）。"""
+    """导出 csv（带标签，给人看）、txt（纯消息，逐条手工发）、
+    jsonl（给发送脚本读：id/大类/类型/消息/期望行为/参考要点）。"""
+    import json
+
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / "messages_200.csv"
     txt_path = out_dir / "messages_200.txt"
+    jsonl_path = out_dir / "messages_200_send.jsonl"
 
     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
@@ -433,6 +438,14 @@ def export(out_dir: Path = OUT_DIR) -> tuple[Path, Path]:
             w.writerow([qid, GROUPS.get(qid[0], ""), cat, msg, exp, ref])
 
     txt_path.write_text("\n".join(m[2] for m in MESSAGES) + "\n", encoding="utf-8")
+
+    with jsonl_path.open("w", encoding="utf-8") as f:
+        for qid, cat, msg, exp, ref in MESSAGES:
+            f.write(json.dumps({
+                "id": qid, "group": GROUPS.get(qid[0], ""), "type": cat,
+                "message": msg, "expected": exp, "ref": ref,
+            }, ensure_ascii=False) + "\n")
+
     return csv_path, txt_path
 
 

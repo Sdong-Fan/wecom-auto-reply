@@ -45,6 +45,21 @@ _MAX_CLOSING_LEN = 12  # 超过这个长度基本是有内容的，不判收尾
 
 _STRIP_RE = re.compile(r"[\s，,。.!！~～、：:]+")
 
+# ★ 无信息量消息：一个字母/汉字都没有（纯符号、纯数字、纯表情、乱码）。
+#
+# 2026-09-29 加（200 条测试集）：客户乱敲键盘时机器人回了调侃话 ——
+#   「1234567890」→「哈哈这是啥，密码吗 😂」
+#   「@#￥%……&*」→「哈哈这是手滑了还是键盘坏了 😂」
+#   「。。。」→「哈哈你这省略号是啥意思 😂」
+# 客户没说话，机器人却接话茬，观感很差；而且这类消息进闲聊通道还能绕开转人工。
+# \w 在 Python 里包含汉字，所以"没有 \\w 字符"= 没有汉字也没有字母。
+_HAS_WORD = re.compile(r"[^\W\d_]", re.UNICODE)
+
+
+def is_low_information(text: str) -> bool:
+    """这条消息有没有"字"（汉字或字母）？没有就属于无信息量，不该回。"""
+    return not _HAS_WORD.search(text or "")
+
 
 def _closing_re() -> re.Pattern:
     # 收尾词后面允许跟一点语气标点，整串才算收尾
@@ -62,6 +77,10 @@ def should_reply(text: str, config: dict = None) -> Tuple[bool, str]:
     raw = (text or "").strip()
     if not raw:
         return False, "空消息"
+
+    # 无信息量（纯符号/纯数字/纯表情/乱码）→ 不回、不转人工、不刷屏
+    if is_low_information(raw):
+        return False, "无信息量（纯符号/数字/表情）"
 
     stripped = _STRIP_RE.sub("", raw)
     # 太长基本有实质内容，不冒险判收尾

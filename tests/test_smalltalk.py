@@ -76,6 +76,17 @@ def test_tone_block_formats_as_list():
     "我是客服，有什么可以帮您",          # 客服腔
     "作为AI我无法回答",                 # 暴露身份
     "", "x" * 200,                      # 空 / 太长
+    # ★ 2026-09-29 加：200 条测试集跑出来的 12 条"危险直发"里，绝大多数是
+    #   闲聊通道把**拖延/承诺**的话直接发给了客户 ——
+    #     「支持分期吗」→「这个我得问下店里哈，晚点回你～」
+    #     「我订单到哪了」→「稍等我查下哈～」
+    #     「就它了」→「好嘞 那这台给你留着哈」（凭空承诺留货）
+    #   客户收到"晚点回你"却没有人工工单；这些必须判不合格 → 退回原流程 → 转人工。
+    "稍等我问下店里～",
+    "这个我得问下店里哈，晚点回你～",
+    "好嘞 那这台给你留着哈",
+    "在的，Air 3 有货",
+    "哈哈这句我看不懂呀 😂",
 ])
 def test_smalltalk_ok_rejects(bad):
     from rag.responder import _smalltalk_ok
@@ -85,8 +96,8 @@ def test_smalltalk_ok_rejects(bad):
 @pytest.mark.parametrize("good", [
     "在的在的，你说 😄",
     "哈哈这个问题问得好",
-    "稍等我问下店里～",
     "嗯嗯 就是这么回事",
+    "对了，你是想拍什么呀？我帮你看看有什么合适的",
 ])
 def test_smalltalk_ok_accepts(good):
     from rag.responder import _smalltalk_ok

@@ -25,8 +25,9 @@ from rag.retriever import active_collection, search
 from rag.generator import generate_reply, generate_hold_reply
 from rag.guard import (classify_and_dispatch, check_retrieval, high_threshold,
                        UNCERTAINTY_KEYWORDS, GENERIC_REPLY_PATTERNS,
-                       HEDGE_PHRASES, out_of_scope)
-from rag.judge import should_reply
+                       HEDGE_PHRASES, out_of_scope, must_escalate,
+                       unsafe_promise)
+from rag.judge import should_reply, is_low_information
 from rag.local_answers import answer_locally, now_line
 from rag.smalltalk import classify_message
 from rag.generator import generate_smalltalk_reply
@@ -60,11 +61,21 @@ OUT_OF_SCOPE_REPLY = (
 )
 
 
-# 闲聊里出现这些词就说明模型在编业务事实（价格/库存/政策一律不许提）
+# 闲聊里出现这些词就说明模型在编业务事实（价格/库存/政策一律不许提），
+# 或者在说**拖延/承诺**的话（2026-09-29 加：实测"稍等我查下哈""这个我得问下店里
+# 晚点回你""那这台给你留着哈"都从闲聊通道直接发给了客户 —— 客户收到"晚点回你"
+# 却没有人工工单，收到"给你留着"更是凭空承诺）。命中即判不合格 → 退回原流程 →
+# 检索分不够自然转人工。
 _SMALLTALK_BIZ_WORDS = (
     "价格", "多少钱", "元", "块", "折", "优惠", "押金", "租金", "日租",
     "库存", "有货", "现货", "缺货", "型号有", "发票", "税", "退款", "定金",
     "政策", "规定", "合同",
+    # 拖延 / 承诺（不许替店主许愿，也不许让客户干等）
+    "稍等", "等一下", "等会", "等一会儿", "查下", "查一下", "问下", "问一下",
+    "确认下", "确认一下", "晚点", "回头", "待会", "马上", "立刻", "立即",
+    "留着", "留给", "给你留", "预留", "锁定", "保证", "一定", "没问题",
+    # 看不懂/兜不住的话不要接
+    "看不懂", "不懂你", "不明白你", "没听懂",
 )
 
 
@@ -272,7 +283,15 @@ class Responder:
         - ``human_handle``: escalate to human (toast notification)
         """
         text = " ".join(messages).strip()
-        if not text or len(text) < 2:
+        # 无信息量（纯符号/纯数字/纯表情/乱码）→ 不回：
+        #   实测回的是调侃话（"哈哈这是啥，密码吗 😂"），客户乱敲键盘不是要聊天。
+        if not text or is_low_information(text):
+            logger.info(f"无信息量，不回: {text[:20]!r}")
+            return ReplyResult(
+                success=False, reason="无信息量（纯符号/数字/表情）",
+                dispatch_level="no_reply",
+            )
+        if len(text) < 2:
             return ReplyResult(
                 success=False, reason="消息太短",
                 dispatch_level="human_handle",
@@ -301,6 +320,24 @@ class Responder:
                 dispatch_level="auto_send",
                 guard_decision="out_of_scope",
                 guard_reason=f"越界请求（{oos}）",
+                retrieval_score=0.0,
+            )
+
+        # ── 必须转人工：投诉纠纷 / 议价特批 / 重复追问 ────────────────
+        # 这三类不是"资料库有没有"的问题，而是**权限问题**：机器人无权受理投诉、
+        # 无权改价、无权处理没解决的追问。所以不看检索分，命中就转人工。
+        # 实测（200 条测试集）：「我要投诉」被当寒暄接走、投诉没进人工队列；
+        # 「能不能便宜点」直接答了折扣规则（越权报价）。
+        hard = must_escalate(text)
+        if hard:
+            logger.warning(f"必须转人工（{hard}）: {text[:40]!r}")
+            notify_escalation(customer_name, text, reason=hard)
+            return ReplyResult(
+                success=False, reason=hard, escalated=True,
+                hold_text=await self._make_hold_reply(text),
+                dispatch_level="human_handle",
+                guard_decision="must_escalate",
+                guard_reason=hard,
                 retrieval_score=0.0,
             )
 
@@ -416,6 +453,29 @@ class Responder:
 
         # Detect LLM's "needs human" signal — pass to guard, don't hard-block
         llm_requests_human = is_human_marker(reply)
+
+        # ── 承诺护栏：回复里不许替店主许愿 ──────────────────────────
+        # 200 条测试集里最危险的 3 条都在这：检索分很高、数字也都有出处，
+        # 所以数字校验与型号校验都拦不住 ——
+        #   「大疆Air3还有吗」→「在的，Air 3 有货」（资料库没有库存数据）
+        #   「两小时后能自提吗」→「可以的，两小时后就能自提」
+        #   「就它了」→「好嘞 那这台给你留着哈」
+        # 共同点：替店主做了他才有权做的承诺（有货/留货/时效/保证）。
+        # 草稿留给人工（人工能改），但绝不自动发出去。
+        promise = unsafe_promise(reply)
+        if promise:
+            logger.warning(f"回复含越权承诺（{promise}），转人工: {reply[:60]!r}")
+            notify_escalation(customer_name, text,
+                              reason=f"越权承诺（{promise}）", draft_reply=reply)
+            return ReplyResult(
+                success=False, reason=f"越权承诺（{promise}）", escalated=True,
+                reply_text=reply,
+                hold_text=await self._make_hold_reply(text),
+                dispatch_level="human_handle",
+                guard_decision="unsafe_promise",
+                guard_reason=f"越权承诺（{promise}）",
+                retrieval_score=top_score,
+            )
 
         # Combined retrieval + reply quality check
         guard_result = classify_and_dispatch(

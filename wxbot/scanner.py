@@ -26,6 +26,31 @@ from pynput.keyboard import Controller as Kb, Key
 logger = logging.getLogger(__name__)
 
 
+def pick_target_window(candidates, my_pid: int, window_class: str) -> int:
+    """从候选窗口里挑出**真正要操作的那个**，返回 hwnd（0 = 没有）。
+
+    ★ 2026-10-03 加的（现场事故）：原来的发送路径用
+    ``pyautogui.getWindowsWithTitle(标题)`` 按**标题子串**找窗口再取 ``[0]``。
+    但机器人自己的界面标题是「企业微信智能客服」——**也含"企业微信"**，
+    而且刚启动时它的 z-order 在最前面，于是 ``[0]`` 抓到的是机器人自己：
+    回复被粘进自己的界面，企业微信里一条都没发出去。客户侧就是"程序在跑但没反应"。
+
+    规则：
+      1. 排除本进程自己的窗口（拿 pid 比，最可靠）；
+      2. 优先**窗口类完全匹配**的（WeWorkWindow），其次才看标题命中的。
+
+    ``candidates``：``[(hwnd, title, pid, class_name), ...]``，顺序即 z-order。
+    """
+    best = None
+    for idx, (hwnd, _title, pid, cls) in enumerate(candidates):
+        if pid == my_pid:
+            continue
+        score = 0 if cls == window_class else 1
+        if best is None or score < best[0]:
+            best = (score, idx, hwnd)
+    return best[2] if best else 0
+
+
 def _force_foreground(hwnd: int) -> bool:
     """把 hwnd 切到前台，绕过 Windows 的前台锁定限制。
 
@@ -707,26 +732,70 @@ class Scanner:
 
     # ═══ 前台切换 + 键盘发送 ═══════════════
 
+    def _find_by_title(self) -> int:
+        """按标题兜底找目标窗口 —— **排除本进程自己的窗口**。
+
+        正常路径是 ``find_window()``（按进程名 + 窗口类，扫描一直在用）。
+        这里只是兜底：万一是别的软件（微信 PC 等）类名对不上，还能靠标题找；
+        但必须排掉机器人自己的界面，否则就回到 2026-10-03 那个事故现场。
+        """
+        hint = self._title_hint or ""
+        if not hint:
+            return 0
+        my_pid = os.getpid()
+        cands = []
+
+        def cb(h, _):
+            try:
+                if not win32gui.IsWindowVisible(h):
+                    return
+                title = win32gui.GetWindowText(h)
+                if hint not in title:
+                    return
+                _, pid = win32process.GetWindowThreadProcessId(h)
+                cands.append((h, title, pid, win32gui.GetClassName(h)))
+            except Exception:
+                pass
+
+        win32gui.EnumWindows(cb, None)
+        return pick_target_window(cands, my_pid, self._window_class)
+
+    def _activate_target(self) -> int:
+        """把目标软件窗口切到前台，返回 hwnd（0 = 失败）。"""
+        hwnd = self.find_window() or self._find_by_title()
+        if not hwnd:
+            logger.warning(f"未找到标题/进程匹配 {self._title_hint!r} 的窗口，跳过操作")
+            return 0
+        try:
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                time.sleep(0.15)
+        except Exception:
+            pass
+        try:
+            if win32gui.SetForegroundWindow(hwnd):
+                return hwnd
+        except Exception as e:
+            logger.debug(f"SetForegroundWindow 抛异常: {e}")
+        # 后台线程抢前台会被 Windows 前台锁定拒绝（错误码 5/0），走 AttachThreadInput 兜底
+        if _force_foreground(hwnd):
+            return hwnd
+        logger.warning("切到目标窗口失败（前台锁定被拒），跳过操作")
+        return 0
+
     def _switch_to_wecom_and_back(self, func):
         """切到目标软件窗口 → 执行 func（通常是粘贴+回车）→ 切回原来的窗口。
 
-        窗口标题必须来自 profile，不能写死「企业微信」——
-        否则切到微信模式后，这里会把**企业微信**激活，回复粘到错误的地方去。
+        ★ 目标窗口只认 ``find_window()``（进程名 + 窗口类），不再按标题子串取
+        ``windows[0]`` —— 机器人自己的界面标题也叫「企业微信智能客服」，
+        按标题找会把回复粘进自己界面（2026-10-03 事故，见 pick_target_window）。
         """
         prev_window = pyautogui.getActiveWindow()
         prev_pos = pyautogui.position()
-        hint = self._title_hint
-        windows = pyautogui.getWindowsWithTitle(hint) if hint else []
-        if not windows:
-            logger.warning(f"未找到标题含 {hint!r} 的窗口，跳过操作")
-            raise RuntimeError(f"未找到 {hint} 窗口")
-        target_window = windows[0]
-        try:
-            target_window.activate()
-            time.sleep(0.2)
-        except Exception as e:
-            logger.warning(f"切换前台失败: {e}，跳过操作")
-            raise
+        hwnd = self._activate_target()
+        if not hwnd:
+            raise RuntimeError(f"无法切换到 {self._title_hint} 窗口")
+        time.sleep(self._t_focus)
         try:
             func()
         finally:

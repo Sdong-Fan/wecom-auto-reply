@@ -122,11 +122,14 @@ def _load_config() -> dict:
 
 def run(limit: int | None = None, out: Path | None = None,
         high: float | None = None, low: float | None = None,
-        quiet: bool = False) -> dict:
+        quiet: bool = False, questions: list | None = None) -> dict:
     """跑一遍评测集。
 
     ``high`` / ``low``：临时覆盖自动发门槛与低分门槛（阈值扫描用）。
     不传就用 config.json 里的值。
+
+    ``questions``：换一套题（格式同 ``QUESTIONS``，5 元组）。不传就用内置 46 题；
+    200 条遍历式测试集见 ``scripts/eval_messages_200.py``。
     """
     from dotenv import load_dotenv
     load_dotenv(override=True)
@@ -158,7 +161,9 @@ def run(limit: int | None = None, out: Path | None = None,
     r._context = ContextStore(base_dir=str(tmp / "context"))   # ★ 不碰真实记录
     r._log_path = tmp / "eval_log.jsonl"                       # ★ 不污染真实日志
 
-    qs = QUESTIONS[:limit] if limit else QUESTIONS
+    qs = list(questions) if questions else QUESTIONS
+    if limit:
+        qs = qs[:limit]
     if not quiet:
         print(f"载入完成，开始跑 {len(qs)} 题…\n")
     rows = []

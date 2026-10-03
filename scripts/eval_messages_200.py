@@ -410,37 +410,40 @@ def report(path: str | Path, md_out: Path | None = None) -> dict:
 
 
 
-def counts() -> dict:
+def counts(messages: list | None = None) -> dict:
     """按大类 / 期望行为统计，导出与自检都用它。"""
+    msgs = messages if messages is not None else MESSAGES
     by_group: dict[str, int] = {}
     by_expected: dict[str, int] = {}
-    for _qid, _cat, _msg, exp, _ref in MESSAGES:
+    for _qid, _cat, _msg, exp, _ref in msgs:
         g = GROUPS.get(_qid[0], "?")
         by_group[g] = by_group.get(g, 0) + 1
         by_expected[exp] = by_expected.get(exp, 0) + 1
-    return {"total": len(MESSAGES), "by_group": by_group, "by_expected": by_expected}
+    return {"total": len(msgs), "by_group": by_group, "by_expected": by_expected}
 
 
-def export(out_dir: Path = OUT_DIR) -> tuple[Path, Path]:
+def export(out_dir: Path = OUT_DIR, messages: list | None = None,
+           prefix: str = "messages_200") -> tuple[Path, Path]:
     """导出 csv（带标签，给人看）、txt（纯消息，逐条手工发）、
     jsonl（给发送脚本读：id/大类/类型/消息/期望行为/参考要点）。"""
     import json
 
+    msgs = messages if messages is not None else MESSAGES
     out_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = out_dir / "messages_200.csv"
-    txt_path = out_dir / "messages_200.txt"
-    jsonl_path = out_dir / "messages_200_send.jsonl"
+    csv_path = out_dir / f"{prefix}.csv"
+    txt_path = out_dir / f"{prefix}.txt"
+    jsonl_path = out_dir / f"{prefix}_send.jsonl"
 
     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
         w.writerow(["编号", "大类", "类型", "消息", "期望行为", "参考要点"])
-        for qid, cat, msg, exp, ref in MESSAGES:
+        for qid, cat, msg, exp, ref in msgs:
             w.writerow([qid, GROUPS.get(qid[0], ""), cat, msg, exp, ref])
 
-    txt_path.write_text("\n".join(m[2] for m in MESSAGES) + "\n", encoding="utf-8")
+    txt_path.write_text("\n".join(m[2] for m in msgs) + "\n", encoding="utf-8")
 
     with jsonl_path.open("w", encoding="utf-8") as f:
-        for qid, cat, msg, exp, ref in MESSAGES:
+        for qid, cat, msg, exp, ref in msgs:
             f.write(json.dumps({
                 "id": qid, "group": GROUPS.get(qid[0], ""), "type": cat,
                 "message": msg, "expected": exp, "ref": ref,

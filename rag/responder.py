@@ -26,7 +26,7 @@ from rag.generator import generate_reply, generate_hold_reply
 from rag.guard import (classify_and_dispatch, check_retrieval, high_threshold,
                        UNCERTAINTY_KEYWORDS, GENERIC_REPLY_PATTERNS,
                        HEDGE_PHRASES, out_of_scope, must_escalate,
-                       unsafe_promise)
+                       unsafe_promise, deferral_phrase)
 from rag.judge import should_reply, is_low_information
 from rag.local_answers import answer_locally, now_line
 from rag.smalltalk import classify_message
@@ -477,7 +477,26 @@ class Responder:
                 retrieval_score=top_score,
             )
 
-        # Combined retrieval + reply quality check
+        # ── 拖延话术护栏：主通道也不许自己写"我问问店里再回你" ──────────
+        # 2026-10-03 第二批现场：「能签三方合同吗」→「这块得跟店里确认下，晚点回你哈」
+        # 被**自动发了出去**。客户在等，人工却不知道（没有工单）。
+        # 这类话该由转人工的占位语去说，同时生成待人工条目。
+        defer = deferral_phrase(reply)
+        if defer:
+            logger.warning(f"回复是拖延话术（{defer}），改为转人工: {reply[:60]!r}")
+            notify_escalation(customer_name, text,
+                              reason="回复是拖延话术（应为转人工）", draft_reply=reply)
+            return ReplyResult(
+                success=False, reason="回复是拖延话术（应为转人工）", escalated=True,
+                reply_text=reply,
+                hold_text=await self._make_hold_reply(text),
+                dispatch_level="human_handle",
+                guard_decision="deferral_phrase",
+                guard_reason=f"拖延话术（{defer}）",
+                retrieval_score=top_score,
+            )
+
+        # ── 三档质量门控走这里的 classify_and_dispatch ──────────────────
         guard_result = classify_and_dispatch(
             scores, reply, chunks,
             config=self._config,

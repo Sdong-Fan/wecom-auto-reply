@@ -88,3 +88,8 @@ Desktop.ini
 
 # 任意后缀的备份（.bak / .bak2 / .bak3 …）
 *.bak*
+
+# 打包产物（1.6GB 级别的 zip，不进仓库）
+WeComBot-v*.zip
+*.zip
+

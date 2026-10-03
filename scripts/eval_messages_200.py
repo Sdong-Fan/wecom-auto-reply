@@ -303,6 +303,111 @@ MESSAGES = [
 
 EXPECTED_VALUES = {"auto", "escalate", "no_reply"}
 
+# 期望行为 → 机器人实际决策（与 eval_set._OK 同口径）
+_OK = {"auto": "auto_send", "escalate": "human_handle", "no_reply": "no_reply"}
+
+
+def report(path: str | Path, md_out: Path | None = None) -> dict:
+    """读一份评测结果 json，按大类/类型出体检报告。不调模型。"""
+    import json
+
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    rows = data.get("rows", [])
+    total = len(rows)
+    ok = [r for r in rows if _OK.get(r["expected"]) == r.get("dispatch_level")]
+    danger = [r for r in rows if r["expected"] == "escalate"
+              and r.get("dispatch_level") == "auto_send"]
+    silent = [r for r in rows if r["expected"] == "auto"
+              and r.get("dispatch_level") != "auto_send"]
+    noisy = [r for r in rows if r["expected"] == "no_reply"
+             and r.get("dispatch_level") != "no_reply"]
+
+    def _rate(rs):
+        n = len(rs)
+        good = sum(1 for r in rs if _OK.get(r["expected"]) == r.get("dispatch_level"))
+        return n, good, (good / n if n else 1.0)
+
+    by_group, by_type = [], []
+    for key, bucket in (("大类", "group"), ("类型", "type")):
+        seen: dict[str, list] = {}
+        for r in rows:
+            name = GROUPS.get(r["id"][0], "?") if bucket == "group" else r["cat"]
+            seen.setdefault(name, []).append(r)
+        target = by_group if bucket == "group" else by_type
+        for name, rs in seen.items():
+            n, good, rate = _rate(rs)
+            bad = [r["id"] for r in rs
+                   if _OK.get(r["expected"]) != r.get("dispatch_level")]
+            target.append({"name": name, "n": n, "ok": good,
+                           "rate": rate, "bad": bad})
+
+    lines = [
+        f"# 200 条测试消息 · 体检报告",
+        "",
+        f"数据：`{Path(path).name}`",
+        "",
+        "## 总览",
+        "",
+        f"* 共 **{total}** 条，行为符合期望 **{len(ok)}/{total}"
+        f"（{len(ok)/total*100:.1f}%）**" if total else "* 无数据",
+        f"* 危险直发（期望转人工却发出去了）：**{len(danger)}**",
+        f"* 该答没答：**{len(silent)}**",
+        f"* 不该回却回了：**{len(noisy)}**",
+        "",
+        "## 按大类",
+        "",
+        "| 大类 | 条数 | 符合 | 符合率 | 不符合的题号 |",
+        "| :--- | ---: | ---: | ---: | :--- |",
+    ]
+    for g in sorted(by_group, key=lambda x: x["name"]):
+        lines.append(f"| {g['name']} | {g['n']} | {g['ok']} | "
+                     f"{g['rate']*100:.0f}% | {' '.join(g['bad']) or '—'} |")
+
+    lines += ["", "## 按类型（只列有问题的）", "",
+              "| 大类 | 类型 | 条数 | 符合率 | 不符合的题号 |",
+              "| :--- | :--- | ---: | ---: | :--- |"]
+    weak = [t for t in by_type if t["bad"]]
+    for t in sorted(weak, key=lambda x: x["rate"]):
+        lines.append(f"| {t['name'][:2]} | {t['name']} | {t['n']} | "
+                     f"{t['rate']*100:.0f}% | {' '.join(t['bad'])} |")
+    if not weak:
+        lines.append("| — | 全部类型通过 | — | 100% | — |")
+
+    def _dump(title: str, rs: list, extra=None):
+        lines.extend(["", f"## {title}", ""])
+        if not rs:
+            lines.append("无。")
+            return
+        for r in rs:
+            lines.append(f"* **{r['id']}** [{r['cat']}] 问：{r['question']}")
+            lines.append(f"  * 期望 `{r['expected']}` → 实际 `{r.get('dispatch_level')}`"
+                         f"（guard={r.get('guard_decision')} "
+                         f"分={r.get('retrieval_score')} 原因={r.get('guard_reason') or r.get('reason') or '—'}）")
+            if extra:
+                lines.append(f"  * {extra(r)}")
+
+    _dump("危险直发（最严重：客户收到了不该发的答案）", danger,
+          lambda r: f"发出内容：{(r.get('reply') or '').strip()[:160]}")
+    _dump("该答没答（体验损失）", silent,
+          lambda r: f"实际动作：{r.get('dispatch_level')}；占位话术：{(r.get('hold') or '').strip()[:80]}")
+    _dump("不该回却回了", noisy,
+          lambda r: f"发出内容：{(r.get('reply') or '').strip()[:160]}")
+
+    md = "\n".join(lines) + "\n"
+    if md_out:
+        Path(md_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(md_out).write_text(md, encoding="utf-8")
+
+    summary = {"total": total, "behaviour_ok": len(ok),
+               "dangerous_send": len(danger), "answered_nothing": len(silent),
+               "noisy_reply": len(noisy), "by_group": by_group,
+               "by_type": by_type, "md": md}
+    print(md)
+    if md_out:
+        print(f"报告已写入 {md_out}")
+    return summary
+
+
 
 def counts() -> dict:
     """按大类 / 期望行为统计，导出与自检都用它。"""
@@ -334,11 +439,17 @@ def export(out_dir: Path = OUT_DIR) -> tuple[Path, Path]:
 def main():
     ap = argparse.ArgumentParser(description="测试消息 200 条：导出 + 批量跑")
     ap.add_argument("--export", action="store_true", help="只导出 csv/txt，不调模型")
+    ap.add_argument("--report", default=None, help="读一份结果 json 出体检报告，不调模型")
+    ap.add_argument("--md", default=None, help="报告写入路径（配合 --report）")
     ap.add_argument("--limit", type=int, default=None, help="只跑前 N 条")
     ap.add_argument("--out", default=None, help="结果 json 路径")
     ap.add_argument("--high", type=float, default=None, help="临时覆盖自动发门槛")
     ap.add_argument("--low", type=float, default=None, help="临时覆盖低分门槛")
     a = ap.parse_args()
+
+    if a.report:
+        report(a.report, Path(a.md) if a.md else None)
+        return
 
     csv_path, txt_path = export()
     stat = counts()

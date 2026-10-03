@@ -787,7 +787,7 @@ class Scanner:
         """切到目标软件窗口 → 执行 func（通常是粘贴+回车）→ 切回原来的窗口。
 
         ★ 目标窗口只认 ``find_window()``（进程名 + 窗口类），不再按标题子串取
-        ``windows[0]`` —— 机器人自己的界面标题也叫「企业微信智能客服」，
+        列表里的第一个 —— 机器人自己的界面标题也叫「企业微信智能客服」，
         按标题找会把回复粘进自己界面（2026-10-03 事故，见 pick_target_window）。
         """
         prev_window = pyautogui.getActiveWindow()

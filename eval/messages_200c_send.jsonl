@@ -104,7 +104,7 @@
 {"id": "C24C", "group": "资料缺口（应转人工）", "type": "库存与现货", "message": "现在有几台A7R5", "expected": "escalate", "ref": "同上"}
 {"id": "C25C", "group": "资料缺口（应转人工）", "type": "库存与现货", "message": "周末有档期吗", "expected": "escalate", "ref": "同上"}
 {"id": "C26C", "group": "资料缺口（应转人工）", "type": "议价与特批", "message": "我想按同行价拿", "expected": "escalate", "ref": "议价特批"}
-{"id": "C27C", "group": "资料缺口（应转人工）", "type": "议价与特批", "message": "租十台能打几折", "expected": "escalate", "ref": "企业价需人工谈"}
+{"id": "C27C", "group": "资料缺口（应转人工）", "type": "议价与特批", "message": "租十台能打几折", "expected": "auto", "ref": "资料：单次 5 台以上可谈企业价，年度框架 8 折 + 月结（有答案，不该转人工）"}
 {"id": "C28C", "group": "资料缺口（应转人工）", "type": "议价与特批", "message": "能不能免掉运费", "expected": "escalate", "ref": "运费规则固定，特批需人工"}
 {"id": "C29C", "group": "资料缺口（应转人工）", "type": "议价与特批", "message": "多给点赠品吧", "expected": "escalate", "ref": "无赠品权限"}
 {"id": "C30C", "group": "资料缺口（应转人工）", "type": "议价与特批", "message": "押金能打折吗", "expected": "escalate", "ref": "押金规则固定"}

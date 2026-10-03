@@ -220,8 +220,8 @@
     "model": "deepseek-chat"
   },
   "rag": {
-    "high_confidence_threshold": 0.55,
-    "_high_confidence_threshold_comment": "自动发门槛：检索分高于它才直接发给客户。0.65→0.55 是 2026-09-27 用 46 题评测集扫了 7 个值定的：0.55 能多自动答 5 题、危险直发仍然 0；≤0.40 时开始出现「语义不明的话被自动答出去」（scripts/threshold_scan.py）",
+    "high_confidence_threshold": 0.5,
+    "_high_confidence_threshold_comment": "自动发门槛：检索分高于它才直接发给客户。0.65->0.55 是 2026-09-27 用 46 题评测集扫的；0.55->0.50 是 2026-10-03 重扫定的，依据两条独立证据：①46 题扫描 0.50 行为符合 42/46（0.55 是 41/46），危险直发都是 0；②三批各 200 条（共 600 条，第三批是全新句面）实测 0.50 符合 560/600、0.55 符合 550/600，危险直发都是 0。降门槛之前先补齐了越权承诺/拖延话术/议价加码/资料未覆盖政策/指代不明/库存档期等护栏（scripts/threshold_scan.py + scripts/compare_thresholds.py）",
     "low_confidence_threshold": 0.4,
     "allow_auto_send": true
   },

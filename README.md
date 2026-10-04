@@ -10,7 +10,7 @@
 
 ![python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![platform](https://img.shields.io/badge/Platform-Windows-0078d4)
-![tests](https://img.shields.io/badge/tests-1178%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-1403-brightgreen)
 ![license](https://img.shields.io/badge/License-MIT-green)
 
 > ⚠️ **使用前请读**：[合规与免责](#合规与免责)。自动操作第三方客户端可能违反平台规则，
@@ -194,10 +194,10 @@ python scripts/privacy_check.py --path .               # 检查仓库
 ## 测试与评测
 
 ```bash
-SKIP_EMBED_TESTS=1 python -m pytest tests/ -q     # 1388 passed, 4 skipped
+SKIP_EMBED_TESTS=1 python -m pytest tests/ -q     # 1398 passed, 5 skipped（本机全绿）
 ```
 
-* **1388 个测试**：含"发错人""内部信号外泄""重启后重复回复""编造型号""越权承诺"等事故的回归测试。
+* **1403 个测试**：含"发错人""内部信号外泄""重启后重复回复""编造型号""越权承诺"等事故的回归测试。
 * **46 题评测集**（`scripts/eval_set.py`，含 10 道"应该转人工"的陷阱题）：
 
 | 版本 | 行为符合期望 | 危险直发（该转人工却发了） |
@@ -244,7 +244,7 @@ profiles/               窗口标定（企业微信 / 微信 PC）
 examples/kb_demo/       虚构示例资料（相机租赁）
 scripts/                评测、阈值扫描、打包、隐私自检、标定、诊断
 docs/                   设计文档、事故复盘、打包与隐私检查
-tests/                  1178 个测试
+tests/                  1403 个测试
 ```
 
 ---
@@ -305,13 +305,13 @@ tests/                  1178 个测试
 | 方向 | 具体改造 | 证据 |
 |---|---|---|
 | 质量护栏 | 三态门控（pass / low_risk / block）；**数字必须有资料出处**（含 12/24 小时制等价）；**型号也有出处**（含否定句不误拦）；越界请求模板婉拒 | `rag/guard.py`、`tests/test_eval_fixes.py` |
-| 评测体系 | 46 题评测集（含 10 道"应转人工"陷阱题）+ 可重复跑分脚本 + **阈值扫描**（0.35→0.65 找危险临界点，最终定 0.55） | `scripts/eval_set.py`、`scripts/threshold_scan.py` |
+| 评测体系 | 46 题评测集（含 10 道"应转人工"陷阱题）+ 可重复跑分脚本 + **阈值扫描**（0.35→0.65 找危险临界点，最终定 0.50） | `scripts/eval_set.py`、`scripts/threshold_scan.py` |
 | 人机闭环 | 人工改稿**确认后**才学习；「最常转人工的问题」排行榜 + 双击预填 + 已补/待补状态回退 | `gui/kb_dialog.py`、`rag/learn*.py` |
 | 发送安全 | 发送前**确认会话名**（防发错人）、失败重试、发完校验；内部信号永不外发 | `wxbot/scanner.py`、`main.py` |
 | 去重与漏答 | 两本账：'已经有人回过' 记 24h、'待回复' 只用 10 分钟短窗口（漏答比重复回严重）；"人工回过也算回过" | `wxbot/detector/_message_detector.py` |
 | 知识库能力 | 多资料库档案、资料库增删改与撤销、Excel/Word 上传、提示词界面可编辑 | `rag/archives.py`、`gui/kb_edit.py`、`pipeline/upload.py` |
 | 交付与隐私 | 打包隐私门禁（凭据/客户数据/exe 字节串自检，不通过即中止）、免安装分包、使用说明 | `scripts/privacy_check.py`、`scripts/build.py` |
-| 工程保障 | 测试从 ~248 增至 **1178 个**；4 次真实事故的根因修复与回归测试 | `tests/`、`docs/事故-*.md` |
+| 工程保障 | 测试从 ~248 增至 **1403 个**；4 次真实事故的根因修复与回归测试 | `tests/`、`docs/事故-*.md` |
 
 **为什么如实写明来源**：MIT 许可证要求保留原始版权声明；而且如实说明来源，
 比含糊其辞更能体现"能读懂既有代码、定位真正的风险点、并用数据证明改动有效"。

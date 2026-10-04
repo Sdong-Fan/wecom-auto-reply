@@ -44,6 +44,29 @@ def _app_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def _can_start() -> tuple[bool, str]:
+    """能不能点「开始」——返回 (是否允许, 不允许的原因)。
+
+    ★ **没配模型接口就不让开始**（使用者实测反馈后定的口径）：
+    以为"没填 Key 就等于完全没动作"，其实它会照常回客户 ——
+    时间类问题直接答、越界请求按模板婉拒、**每个答不了的问题都会回一句
+    "稍等，我帮您确认一下"**。要是没人盯「待人工」，客户就是被许了个不会来的回复。
+    与其发一堆空头承诺，不如拦下来先让他配好。
+    """
+    try:
+        from rag.llm_client import resolve_config
+        key, _base, _model = resolve_config()
+    except Exception:
+        return True, ""          # 判不出来就别把人锁在门外
+    if key:
+        return True, ""
+    return False, (
+        "还没配模型接口，不能开始。\n\n"
+        "没配的话，业务问题全都答不了；但客户仍会收到一句"
+        "「稍等，我帮您确认一下」—— 没人处理「待人工」就等于替老板许了个空头承诺。\n\n"
+        "请先在「设置」里填模型接口（任意 OpenAI 兼容服务，DeepSeek 等都可以）。")
+
+
 # ★ **必须指定路径**，不能写 `load_dotenv()`：
 #   无参时 python-dotenv 会从调用者所在目录**一路往上找** `.env`，
 #   于是把程序解压到别人的项目目录里（或程序目录本身在某个有 .env 的目录下）时，
@@ -231,7 +254,7 @@ def _main_impl():
         window.set_banner(f"「{key}」提示词已保存，立即生效。", level="ok")
 
     window = MainWindow(on_settings=_open_settings, on_kb=_open_kb,
-                        on_dashboard=_open_dashboard)
+                        on_dashboard=_open_dashboard, can_start=_can_start)
 
     # 待人工队列：置信度不足的消息连同 AI 草稿一起放这里，
     # 在 GUI「待人工」页可以选择直接发送或编辑后发送
@@ -273,6 +296,19 @@ def _main_impl():
     else:
         window.set_banner("未启动。当前：企业微信 · 截图模式。"
                           "点「开始」运行，或点「设置」重新配置。", level="warn")
+
+    # ★ 没配模型接口时的提示（守卫本体是模块级的 _can_start，见文件开头）
+    def _check_llm_ready():
+        ok, _why = _can_start()
+        if ok:
+            return
+        log.warning("未配置模型接口（.env 里没有可用的 LLM_API_KEY）："
+                    "「开始」会被拦下 —— 否则客户会收到占位语却没人处理。")
+        window.set_banner(
+            "⚠️ 还没配模型接口 —— 点「开始」会被拦下。"
+            "请点「设置」填 API Key（任意 OpenAI 兼容服务）。", level="error")
+
+    root.after(400, _check_llm_ready)
 
     def _refresh_pending_tab():
         """刷新 GUI 的待人工页。"""

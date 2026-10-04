@@ -50,7 +50,7 @@ class MainWindow:
 
     def __init__(self, on_pause: Callable = None, on_resume: Callable = None,
                  on_settings: Callable = None, on_kb: Callable = None,
-                 on_dashboard: Callable = None):
+                 on_dashboard: Callable = None, can_start: Callable = None):
         self.on_pause = on_pause
         self.on_resume = on_resume
         # 「设置」常驻在头部，任何状态（未启动/运行中/已配置过）都能点开重配
@@ -59,12 +59,19 @@ class MainWindow:
         self.on_kb = on_kb
         # 「数据」：运营看板（今日/近7天/自定义；我该补什么资料）
         self.on_dashboard = on_dashboard
+        # ★ 「能不能开始」的守卫（由 main.py 注入）：返回 (是否允许, 原因)。
+        #   没配模型接口时不许开始 —— 否则机器人答不了业务问题，却照样回客户
+        #   "稍等，我帮您确认一下"；没人处理「待人工」就等于替店主许了个空头承诺。
+        self.can_start = can_start
         self._records: List[MessageRecord] = []
         # 默认**未启动**：打开程序不会自动开始扫描/回复，先让用户确认配置再点「开始」。
         # 已有的暂停机制本来就同时挡住两条通道（截图扫描与 API 轮询），所以直接复用。
         # 想开机就跑（或脚本化启动）：设环境变量 WECOM_AUTOSTART=1。
         import os as _os
         self._autostart = _os.getenv("WECOM_AUTOSTART", "0").strip() == "1"
+        if self._autostart and not self._start_allowed()[0]:
+            # 没配好就不许偷偷跑起来（脚本化启动也一样）
+            self._autostart = False
         self._paused = not self._autostart
         self._should_exit = False
 
@@ -434,8 +441,41 @@ class MainWindow:
                    command=self._clear_records).pack(side=tk.LEFT, padx=(SPACE["xs"], 0))
 
 
+    def _start_allowed(self):
+        """问一下守卫能不能开始。守卫自己出错就当允许（别把它变成锁死程序的东西）。"""
+        # getattr：单元测试会用 MainWindow.__new__ 造"半成品"实例，不能假设属性都在
+        guard = getattr(self, "can_start", None)
+        if guard is None:
+            return True, ""
+        try:
+            ok, why = guard()
+            return bool(ok), (why or "")
+        except Exception:
+            return True, ""
+
+    def _refuse_start(self, why: str):
+        """配置不完整 → 不让开始，并直接把人送到「设置」。"""
+        self._pause_btn.config(text="开始")
+        self._status_label.config(text="状态：未启动")
+        one_line = " ".join((why or "").split())
+        self.set_banner(f"⚠️ {one_line}", level="error")
+        try:
+            go = messagebox.askyesno("还不能开始", f"{why}\n\n现在打开「设置」？")
+        except Exception:
+            go = False
+        if go and self.on_settings:
+            try:
+                self.on_settings()
+            except Exception:
+                pass
+
     def _toggle_pause(self):
         """切换运行/停止状态（默认是「未启动」）"""
+        if self._paused:                      # 即将「开始」→ 先过守卫
+            ok, why = self._start_allowed()
+            if not ok:
+                self._refuse_start(why)
+                return
         self._paused = not self._paused
         if self._paused:
             self._pause_btn.config(text="开始")

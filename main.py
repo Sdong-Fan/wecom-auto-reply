@@ -318,14 +318,17 @@ def _main_impl():
         ctypes clipboard + keyboard input takes ~300ms.
         Processing multiple items in a loop would freeze the UI.
 
-        队列项可能是 3 元组 ``(mode, 客户, 文本)``，也可能是 4 元组 ——
+        队列项可能是 3 元组 ``(mode, 客户, 文本)``，也可能是 4/5 元组 ——
         第 4 项是"这次是人工改过的"上下文（客户原话 + AI 草稿），
-        只有它能触发学习（见 rag/learn.py）。
+        只有它能触发学习（见 rag/learn.py）；
+        第 5 项是**日志上下文**（客户原话 + 护栏判定 + decision_path + source），
+        只用于落盘给运营看板统计，不参与业务判断。
         """
         try:
             row = send_queue.get_nowait()
             mode, customer_name, reply_text = row[0], row[1], row[2]
             learn_ctx = row[3] if len(row) > 3 else None
+            log_ctx = row[4] if len(row) > 4 else None
             log.debug(f"发送队列处理: mode={mode} customer={customer_name}")
 
             # ★ 第一次跟这个客户说话 → 先招呼一句，正文放回队列下一轮发。
@@ -338,7 +341,8 @@ def _main_impl():
 
             send_ok = _do_send(customer_name, reply_text)
             # Log send result AFTER actual send (not optimistically)
-            responder.log_send_result(customer_name, reply_text, send_ok)
+            responder.log_send_result(customer_name, reply_text, send_ok,
+                                      **(log_ctx or {}))
             if send_ok:
                 root.after(0,
                     lambda: window.add_record(
@@ -503,7 +507,12 @@ def _main_impl():
         ctx = {"direct_confirm": True,
                "question": item.customer_message or "",
                "draft": item.ai_reply or ""}
-        send_queue.put(("send", who, item.ai_reply, ctx))
+        # 第 5 项：日志上下文（看板要区分"人工直发草稿"和"机器人自动答"）
+        log_ctx = {"customer_message": item.customer_message or "",
+                   "guard_decision": item.guard_decision or "",
+                   "decision_path": "人工直发草稿",
+                   "source": "human_confirm"}
+        send_queue.put(("send", who, item.ai_reply, ctx, log_ctx))
         try:
             from rag import learn_store
             learn_store.bump_accept(item.customer_message, item.ai_reply)
@@ -528,7 +537,11 @@ def _main_impl():
         pending_queue.remove_key(item.key)
         ctx = {"question": item.customer_message or "",
                "draft": item.ai_reply or ""}
-        send_queue.put(("send", item.customer_name, edited_text, ctx))
+        log_ctx = {"customer_message": item.customer_message or "",
+                   "guard_decision": item.guard_decision or "",
+                   "decision_path": "人工改稿后发出",
+                   "source": "human_edit"}
+        send_queue.put(("send", item.customer_name, edited_text, ctx, log_ctx))
         log.info(f"待人工编辑发送: {item.customer_name}: {edited_text[:50]}")
         _refresh_pending_tab()
 
@@ -952,7 +965,16 @@ def _main_impl():
                                         # send_queue → _do_send → _switch_to_wecom_and_back
                                         # UI update happens in _process_send_queue_tick
                                         # after _do_send confirms success
-                                        send_queue.put(("send", customer_name, result.reply_text))
+                                        # ★ 第 5 项是"日志上下文"：客户原话 + 护栏判定，
+                                        #   发给 log_send_result 落盘（看板要用，见 docs/看板-PRD.md）
+                                        send_queue.put((
+                                            "send", customer_name, result.reply_text,
+                                            None,
+                                            {"customer_message": text,
+                                             "guard_decision": result.guard_decision,
+                                             "guard_reason": result.guard_reason,
+                                             "decision_path": result.decision_path,
+                                             "source": "auto"}))
                                         detector.mark_replied(customer_name)
                                         detector.mark_message_seen(customer_name, text)
                                         detector.mark_text_sent(result.reply_text)
@@ -976,7 +998,12 @@ def _main_impl():
                                             if result.hold_text:
                                                 send_queue.put(
                                                     ("send", customer_name,
-                                                     result.hold_text))
+                                                     result.hold_text, None,
+                                                     {"customer_message": text,
+                                                      "guard_decision": result.guard_decision,
+                                                      "guard_reason": result.guard_reason,
+                                                      "decision_path": result.decision_path,
+                                                      "source": "hold"}))
                                                 detector.mark_replied(customer_name)
                                             # 连同 AI 草稿放进「待人工」，等人工发送/编辑
                                             pending_queue.push(
@@ -1416,7 +1443,9 @@ def greet_first_contact(customer_name: str, cfg: dict, send_fn,
         log.warning(f"[欢迎语] 给「{customer_name}」的招呼没发出去，正文照发")
     if log_send:
         try:
-            log_send(customer_name, text, ok)
+            # source=greeting：欢迎语不是"回答客户问题"，看板要能把它单独拎出来
+            log_send(customer_name, text, ok, source="greeting",
+                     decision_path="欢迎语")
         except Exception:
             pass
     return True

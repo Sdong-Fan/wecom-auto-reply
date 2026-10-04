@@ -165,10 +165,12 @@ def test_greet_send_exception_does_not_raise(store):
 def test_greet_logs_send_result(store):
     import main as main_mod
     logged = []
+    # 2026-10-03：欢迎语多了两个关键字参数（source / decision_path）——
+    # 运营看板要把"欢迎语"和"回答客户问题"分开统计，不能混算成自动解决
     main_mod.greet_first_contact(
         "客户A@微信", {}, _Sender(),
-        log_send=lambda n, t, ok: logged.append((n, ok)))
-    assert logged == [("客户A@微信", True)]
+        log_send=lambda n, t, ok, **kw: logged.append((n, ok, kw.get("source"))))
+    assert logged == [("客户A@微信", True, "greeting")]
 
 
 def test_greet_skipped_when_welcome_text_empty(store, monkeypatch):

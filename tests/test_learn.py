@@ -511,7 +511,9 @@ def test_edit_send_carries_learn_context():
     s = _main_src()
     assert '"draft": item.ai_reply' in s
     assert '"question": item.customer_message' in s
-    assert 'send_queue.put(("send", item.customer_name, edited_text, ctx))' in s
+    # 2026-10-03：队列项多了第 5 项「日志上下文」（给运营看板统计用），
+    # 学习仍只看第 4 项 ctx —— 两者互不影响
+    assert 'send_queue.put(("send", item.customer_name, edited_text, ctx, log_ctx))' in s
 
 
 def test_learning_triggered_only_after_send_ok():

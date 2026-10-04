@@ -128,6 +128,62 @@ class ReplyResult:
     guard_decision: str = ""       # "pass" | "block" | "low_risk"
     guard_reason: str = ""
     retrieval_score: float = 0.0
+    decision_path: str = ""        # 具体是哪条路/哪道护栏（看板统计用，见 decision_path_of）
+
+
+# 决策路径：把"内部字段"翻译成看板能直接分组的短标签。
+#
+# 为什么需要它：guard_decision 只有 pass/block/low_risk 三种，guard_reason 又是
+# 给人看的长句（"越权承诺（库存承诺）"）。看板要按"拦下的原因"分组，
+# 就得有一个稳定的枚举值 —— 否则每次都要在看板里写正则解析日志。
+_PATH_BY_REASON = (
+    ("库存承诺", "越权承诺"), ("留货承诺", "越权承诺"), ("时效承诺", "越权承诺"),
+    ("保证承诺", "越权承诺"), ("承诺接单", "越权承诺"),
+    ("拖延话术", "拖延话术"),
+    ("议价加码", "议价加码"), ("议价特批", "议价特批"), ("比价跟价", "比价跟价"),
+    ("押金特批", "押金特批"), ("费用特批", "费用特批"),
+    ("发票政策未覆盖", "政策未覆盖"), ("政策未覆盖", "政策未覆盖"),
+    ("发票寄送", "订单与发票查询"), ("订单查询", "订单与发票查询"),
+    ("订单变更", "订单变更"), ("退款诉求", "退款与投诉"),
+    ("投诉纠纷", "退款与投诉"), ("收货纠纷", "退款与投诉"), ("要找人", "退款与投诉"),
+    ("重复追问未解决", "退款与投诉"), ("超时未处理", "退款与投诉"),
+    ("库存与档期", "库存与档期"), ("指代不明", "指代不明"),
+    ("店主私事", "店主私事"), ("店内情况", "店主私事"),
+    ("越权操作", "越权操作"), ("要人工", "要人工"),
+    ("非本店业务", "非本店业务"), ("时间承诺", "时间承诺"),
+)
+
+
+def decision_path_of(guard_decision: str, guard_reason: str,
+                     dispatch_level: str, reason: str = "") -> str:
+    """把一次决策归一成一个短标签（看板按它分组统计）。"""
+    gr = guard_reason or ""
+    for needle, label in _PATH_BY_REASON:
+        if needle in gr:
+            return label
+    if guard_decision == "out_of_scope":
+        return "越界婉拒"
+    if guard_decision == "smalltalk":
+        return "闲聊"
+    if guard_decision == "local_answer":
+        return "本地直答"
+    if dispatch_level == "no_reply":
+        return "无信息量/收尾"
+    if guard_decision == "unsafe_promise":
+        return "越权承诺"
+    if guard_decision == "deferral_phrase":
+        return "拖延话术"
+    if guard_decision == "must_escalate":
+        return "必须转人工"
+    if dispatch_level == "auto_send":
+        return "正常直答"
+    if "llm_requests_human" in gr:
+        return "模型要人工"
+    if "检索低" in (reason or "") or "置信度" in (reason or "") \
+            or "retrieval" in gr:
+        return "置信度不足"
+    return "其他"
+
 
 
 class Responder:
@@ -195,6 +251,9 @@ class Responder:
                 "dispatch_level": result.dispatch_level,
                 "guard_decision": result.guard_decision,
                 "guard_reason": result.guard_reason,
+                "decision_path": result.decision_path or decision_path_of(
+                    result.guard_decision, result.guard_reason,
+                    result.dispatch_level, result.reason),
                 "generated": result.success,
                 "escalated": result.escalated,
             }
@@ -206,24 +265,38 @@ class Responder:
             logger.warning(f"Failed to write reply log: {e}")
 
     def log_send_result(self, customer_name: str, reply_text: str,
-                        send_ok: bool):
+                        send_ok: bool, customer_message: str = "",
+                        guard_decision: str = "", guard_reason: str = "",
+                        decision_path: str = "", source: str = "auto"):
         """Log auto-send outcome AFTER the actual send completes.
 
         Called from main.py's _process_send_queue_tick after _do_send
         returns. This ensures the JSONL accurately reflects whether the
         message was actually delivered to WeChat.
+
+        ★ 2026-10-03 补齐字段（运营看板的前置改造）：
+          原来这里把 customer_message / guard_decision / guard_reason 都写成空字符串，
+          于是"自动发出去的那些消息客户问了什么"从来没有落盘 —— 看板的
+          「客户问题分布」和「护栏拦下了什么」都缺一半数据。
+          现在由调用方（发送队列）透传：客户原话 + 护栏判定 + decision_path，
+          并用 source 区分这条回复是谁发的（auto=机器人直发 / human_edit=人工改过
+          / human_confirm=人工直接发草稿 / greeting=第一次接触的欢迎语）——
+          否则人工改稿发出的也会被算成"机器人自动解决"。
         """
         try:
             self._log_path.parent.mkdir(parents=True, exist_ok=True)
             entry = {
                 "timestamp": datetime.now().isoformat(),
                 "customer_name": customer_name,
-                "customer_message": "",
+                "customer_message": (customer_message or "")[:500],
                 "ai_reply": reply_text[:500] if reply_text else "",
                 "confidence": 0.0,
                 "dispatch_level": "auto_send",
-                "guard_decision": "",
-                "guard_reason": "",
+                "guard_decision": guard_decision,
+                "guard_reason": guard_reason,
+                "decision_path": decision_path or decision_path_of(
+                    guard_decision, guard_reason, "auto_send"),
+                "source": source,
                 "generated": True,
                 "sent": send_ok,
                 "escalated": False,
@@ -583,6 +656,11 @@ class Responder:
             self._context.append, customer_name, "customer", text)
 
         result = await self.generate_reply(customer_name, messages)
+        # 决策路径统一在这里补齐（各分支只管 guard_decision/reason，不用每条都写）
+        if not result.decision_path:
+            result.decision_path = decision_path_of(
+                result.guard_decision, result.guard_reason,
+                result.dispatch_level, result.reason)
 
         if result.success:
             # For auto_send, logging is deferred until the send actually

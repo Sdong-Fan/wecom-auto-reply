@@ -9,7 +9,7 @@
     "keep_uploaded_copy": true,
     "extract_confirm": "batch",
     "learn": {
-      "enabled": true,
+      "enabled": false,
       "max_items": 50,
       "_comment": "从人工改稿学习：enabled=总开关；max_items=每类最多留多少条（超出丢最旧）"
     }

@@ -192,10 +192,10 @@ python scripts/privacy_check.py --path .               # 检查仓库
 ## 测试与评测
 
 ```bash
-SKIP_EMBED_TESTS=1 python -m pytest tests/ -q     # 1341 passed, 4 skipped
+SKIP_EMBED_TESTS=1 python -m pytest tests/ -q     # 1388 passed, 4 skipped
 ```
 
-* **1341 个测试**：含"发错人""内部信号外泄""重启后重复回复""编造型号""越权承诺"等事故的回归测试。
+* **1388 个测试**：含"发错人""内部信号外泄""重启后重复回复""编造型号""越权承诺"等事故的回归测试。
 * **46 题评测集**（`scripts/eval_set.py`，含 10 道"应该转人工"的陷阱题）：
 
 | 版本 | 行为符合期望 | 危险直发（该转人工却发了） |

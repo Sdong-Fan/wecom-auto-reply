@@ -60,6 +60,44 @@ COLORS = {
 
 FONT_FAMILY = "微软雅黑"
 
+# ── 缩放：整个界面按一个因子等比放大/缩小 ─────────────────────────────────
+#
+# 为什么要它：tkinter 里字号是 pt、间距是 px，**窗口变大时它们不会跟着变**，
+# 于是同一个界面在小窗口里挤成一团、在大窗口里中间一坨空白。
+# 更麻烦的是高 DPI 屏：系统缩放 150% 时，写死的 720px 窗口装不下按 pt 放大的文字
+# （实测主窗口的「知识库/设置」、看板的「近 7 天/自定义」就是这么被裁掉的）。
+#
+# 做法：所有尺寸都过一遍 px()/font()，由 _SCALE 统一放大。
+#   * 基准：屏幕 DPI（96 → 1.0，144 → 1.5）
+#   * 再乘：窗口宽度相对设计宽度的比例（看板会用它做"随窗口等比缩放"）
+_SCALE = 1.0
+MIN_SCALE, MAX_SCALE = 0.8, 2.0
+
+
+def set_scale(factor: float) -> float:
+    """设置全局缩放因子（会夹在 [0.8, 2.0] 内），返回实际生效值。"""
+    global _SCALE
+    _SCALE = max(MIN_SCALE, min(MAX_SCALE, float(factor)))
+    return _SCALE
+
+
+def scale() -> float:
+    return _SCALE
+
+
+def px(value: float) -> int:
+    """把设计稿上的像素值换算成当前缩放下的实际值。"""
+    return int(round(value * _SCALE))
+
+
+def detect_dpi_scale(root: tk.Misc) -> float:
+    """按屏幕 DPI 推断缩放（96dpi=1.0，常见的 125%/150% 会得到 1.25/1.5）。"""
+    try:
+        return max(MIN_SCALE, min(MAX_SCALE, root.winfo_fpixels("1i") / 96.0))
+    except Exception:
+        return 1.0
+
+
 # ── 字号（8px 栅格之外的唯一例外是字号，按"能否一眼分清层级"定）─────────────
 # tkinter 只有 normal/bold，所以层级 = 字号 + 颜色，别指望字重
 SIZES = {
@@ -74,8 +112,9 @@ SIZES = {
 
 
 def font(size_key: str = "body", bold: bool = False):
-    """按语义取字体元组。用 (family, size, style) —— tkinter 的标准写法。"""
-    return (FONT_FAMILY, SIZES.get(size_key, SIZES["body"]),
+    """按语义取字体元组（字号跟着缩放走）。"""
+    base = SIZES.get(size_key, SIZES["body"])
+    return (FONT_FAMILY, max(8, int(round(base * _SCALE))),
             "bold" if bold else "normal")
 
 
@@ -87,11 +126,16 @@ RADIUS = {"card": 8, "control": 6, "pill": 999}   # 自绘圆角用
 
 # ═══ ttk 样式 ═════════════════════════════════════════════════════════════
 
-def apply_theme(root: tk.Misc) -> ttk.Style:
-    """给整个应用上色。**必须在创建控件之前调用**（之后创建的控件才会用上新样式）。
+def apply_theme(root: tk.Misc, scale_factor: float | None = None) -> ttk.Style:
+    """给整个应用上色 + 定缩放。**必须在创建控件之前调用**。
+
+    ``scale_factor`` 不传就按屏幕 DPI 推断；传了就用它（看板会按窗口宽度动态传，
+    做到"框随窗口等比放大缩小"）。可以重复调用：样式会被覆盖成新值 ——
+    注意**已经建好的 tk 控件不会自动改字号**，调用方需要重建那部分界面。
 
     返回 ttk.Style 方便调用方继续加样式。
     """
+    set_scale(scale_factor if scale_factor is not None else detect_dpi_scale(root))
     style = ttk.Style(root)
     # ★ 必须切 clam：Windows 默认的 vista 主题把大部分颜色配置忽略掉，
     #   只改 foreground/background 是没反应的（这是 tkinter 上色最常见的坑）
@@ -134,7 +178,8 @@ def apply_theme(root: tk.Misc) -> ttk.Style:
                     font=font("small"))
 
     # ── 按钮：pill 形（靠 padding 做"胶囊"的观感，tkinter 无圆角）──────────
-    _btn = dict(borderwidth=0, focusthickness=0, relief="flat", padding=(14, 7))
+    _btn = dict(borderwidth=0, focusthickness=0, relief="flat",
+                padding=(px(14), px(7)))
     style.configure("Primary.TButton", background=c["primary"], foreground=c["on_primary"],
                     font=font("body", True), **_btn)
     style.map("Primary.TButton",
@@ -159,7 +204,7 @@ def apply_theme(root: tk.Misc) -> ttk.Style:
     style.configure("Segment.TButton", background=c["canvas"], foreground=c["ink_mute"],
                     font=font("body"), borderwidth=1, relief="solid",
                     bordercolor=c["hairline"], lightcolor=c["canvas"],
-                    darkcolor=c["canvas"], padding=(14, 6))
+                    darkcolor=c["canvas"], padding=(px(14), px(6)))
     style.map("Segment.TButton",
               background=[("active", c["primary_subtle"])],
               foreground=[("active", c["primary_deep"])])
@@ -167,18 +212,18 @@ def apply_theme(root: tk.Misc) -> ttk.Style:
                     foreground=c["primary_deep"], font=font("body", True),
                     borderwidth=1, relief="solid", bordercolor=c["primary_soft"],
                     lightcolor=c["primary_subtle"], darkcolor=c["primary_subtle"],
-                    padding=(14, 6))
+                    padding=(px(14), px(6)))
     style.map("SegmentOn.TButton",
               background=[("active", c["primary_subtle"])],
               foreground=[("active", c["primary_press"])])
 
     # ── 表格 ────────────────────────────────────────────────────────────
     style.configure("Treeview", background=c["canvas"], fieldbackground=c["canvas"],
-                    foreground=c["ink"], rowheight=24, borderwidth=0,
+                    foreground=c["ink"], rowheight=px(24), borderwidth=0,
                     font=font("body"))
     style.configure("Treeview.Heading", background=c["canvas_sunken"],
                     foreground=c["ink_mute"], font=font("small", True),
-                    relief="flat", padding=(6, 5))
+                    relief="flat", padding=(px(6), px(5)))
     style.map("Treeview.Heading", background=[("active", c["canvas_sunken"])])
     style.map("Treeview", background=[("selected", c["primary_subtle"])],
               foreground=[("selected", c["ink"])])
@@ -186,16 +231,16 @@ def apply_theme(root: tk.Misc) -> ttk.Style:
     # ── 输入 ────────────────────────────────────────────────────────────
     style.configure("TEntry", fieldbackground=c["canvas"], foreground=c["ink"],
                     bordercolor=c["hairline_strong"], lightcolor=c["hairline_strong"],
-                    darkcolor=c["hairline_strong"], insertcolor=c["ink"], padding=4)
+                    darkcolor=c["hairline_strong"], insertcolor=c["ink"], padding=px(4))
     style.configure("TCombobox", fieldbackground=c["canvas"], background=c["canvas"],
-                    foreground=c["ink"], arrowcolor=c["ink_mute"], padding=3)
+                    foreground=c["ink"], arrowcolor=c["ink_mute"], padding=px(3))
     style.configure("TCheckbutton", background=c["canvas"], foreground=c["ink_secondary"])
     style.configure("TRadiobutton", background=c["canvas"], foreground=c["ink_secondary"])
 
     # ── 滚动条：细一点，别抢视觉 ────────────────────────────────────────
     style.configure("Vertical.TScrollbar", background=c["canvas_sunken"],
                     troughcolor=c["canvas_soft"], bordercolor=c["canvas_soft"],
-                    arrowcolor=c["ink_mute"], borderwidth=0, width=10)
+                    arrowcolor=c["ink_mute"], borderwidth=0, width=px(11))
     style.configure("Horizontal.TScrollbar", background=c["canvas_sunken"],
                     troughcolor=c["canvas_soft"], bordercolor=c["canvas_soft"],
                     arrowcolor=c["ink_mute"], borderwidth=0)
@@ -203,7 +248,7 @@ def apply_theme(root: tk.Misc) -> ttk.Style:
     # ── 标签页 ──────────────────────────────────────────────────────────
     style.configure("TNotebook", background=c["canvas_soft"], borderwidth=0)
     style.configure("TNotebook.Tab", background=c["canvas_sunken"],
-                    foreground=c["ink_mute"], padding=(14, 7), font=font("body"))
+                    foreground=c["ink_mute"], padding=(px(14), px(7)), font=font("body"))
     style.map("TNotebook.Tab",
               background=[("selected", c["canvas"])],
               foreground=[("selected", c["ink"])])
@@ -226,7 +271,7 @@ def rounded_rect(canvas: tk.Canvas, x1, y1, x2, y2, r: int = RADIUS["card"], **k
     return canvas.create_polygon(pts, smooth=True, **kw)
 
 
-def card(parent, *, padding: int = SPACE["lg"], bg: str | None = None) -> ttk.Frame:
+def card(parent, *, padding: int | None = None, bg: str | None = None) -> ttk.Frame:
     """白底卡片：发丝线边框 + 内边距。tkinter 没有阴影，用边框+底色差做层次。"""
     outer = tk.Frame(parent, background=COLORS["hairline"],
                      highlightthickness=0, bd=0)
@@ -277,27 +322,28 @@ def kpi_card(parent, label: str, value: str, *, unit: str = "",
     return outer
 
 
-def bar_row(parent, name: str, value: int, total: int, *, width: int = 108,
+def bar_row(parent, name: str, value: int, total: int, *, width: int | None = None,
             color: str | None = None) -> tk.Frame:
     """分布条：名称 + 迷你条形 + 数值（看板的"客户在问什么"用它）。"""
+    width = px(108) if width is None else width
     row = tk.Frame(parent, background=COLORS["canvas"])
     tk.Label(row, text=name, font=font("body"), background=COLORS["canvas"],
              foreground=COLORS["ink_secondary"], anchor="w",
-             width=10).pack(side="left")
-    cv = tk.Canvas(row, width=width, height=8, background=COLORS["canvas"],
+             width=px(9)).pack(side="left")
+    cv = tk.Canvas(row, width=width, height=px(8), background=COLORS["canvas"],
                    highlightthickness=0, bd=0)
     cv.pack(side="left", padx=(SPACE["sm"], SPACE["sm"]))
     ratio = (value / total) if total else 0
-    cv.create_rectangle(0, 0, width, 8, fill=COLORS["canvas_sunken"], outline="")
+    cv.create_rectangle(0, 0, width, px(8), fill=COLORS["canvas_sunken"], outline="")
     if ratio > 0:
-        cv.create_rectangle(0, 0, max(2, int(width * ratio)), 8,
+        cv.create_rectangle(0, 0, max(2, int(width * ratio)), px(8),
                             fill=color or COLORS["primary_soft"], outline="")
     tk.Label(row, text=str(value), font=font("body", True),
              background=COLORS["canvas"], foreground=COLORS["ink"],
-             anchor="e", width=4).pack(side="left")
+             anchor="e", width=px(4)).pack(side="left")
     pct = f"{ratio * 100:.0f}%" if total else "—"
     tk.Label(row, text=pct, font=font("small"), background=COLORS["canvas"],
-             foreground=COLORS["ink_faint"], anchor="e", width=4).pack(side="left")
+             foreground=COLORS["ink_faint"], anchor="e", width=px(4)).pack(side="left")
     return row
 
 
@@ -316,5 +362,5 @@ def badge(parent, text: str, tone: str = "info") -> tk.Label:
 def divider(parent, *, pady: int = SPACE["md"]) -> tk.Frame:
     """1px 发丝线分隔（Linear 的做法：靠线分层，不靠阴影）。"""
     line = tk.Frame(parent, height=1, background=COLORS["hairline"])
-    line.pack(fill="x", pady=pady)
+    line.pack(fill="x", pady=px(pady))
     return line

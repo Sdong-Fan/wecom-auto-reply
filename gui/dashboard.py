@@ -20,7 +20,8 @@ from tkinter import filedialog, messagebox, ttk
 
 from stats import aggregate as agg
 from gui.theme import (COLORS, SPACE, apply_theme, badge, bar_row, card,
-                       card_body, divider, font, hint, kpi_card, section_title)
+                       card_body, detect_dpi_scale, divider, font, hint, kpi_card,
+                       px, section_title, set_scale)
 
 # 护栏分组：这些是"我拦下了什么"，和"正常直答"分开显示
 GUARD_PATHS = ("越权承诺", "拖延话术", "议价加码", "议价特批", "比价跟价", "押金特批",
@@ -90,15 +91,61 @@ class DashboardWindow:
         self.win = tk.Toplevel(parent)
         self.win.title("运营看板")
         self.win.configure(background=COLORS["canvas_soft"])
-        self.win.geometry("1220x860")
-        self.win.minsize(1040, 680)
+        # ★ 缩放策略：以屏幕 DPI 为基准，再按**窗口宽度**相对设计宽度等比缩放 ——
+        #   这样"框会随窗口放大缩小"，而不是写死像素。第一版写死了，于是高 DPI 下
+        #   「近 7 天/自定义」被裁、窗口拉大后中间又一坨空白。
+        #   设计稿宽 1220（theme 里 scale=1 时的样子）。
+        self._base_scale = detect_dpi_scale(self.win)
+        natural_w = int(1220 * self._base_scale)
+        natural_h = int(880 * self._base_scale)
+        sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
+        w = max(int(900 * self._base_scale), min(natural_w, sw - 80))
+        h = max(int(640 * self._base_scale), min(natural_h, sh - 120))
+        self.win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 3}")
+        self.win.minsize(int(780 * self._base_scale), int(520 * self._base_scale))
         self.win.protocol("WM_DELETE_WINDOW", self._close)
-        apply_theme(self.win)
+        apply_theme(self.win, self._base_scale)
+        self._scale_now = self._base_scale
+        self._resize_job = None
+        # 窗口尺寸一变就重新按比例算缩放（防抖 180ms，避免拖拽时反复重建）
+        self.win.bind("<Configure>", self._on_window_configure)
 
         self._build()
         self.refresh()
 
     # ── 界面骨架 ───────────────────────────────────────────────────────
+
+    def _on_window_configure(self, event=None):
+        """窗口大小变了 → 按新宽度重算缩放（防抖后再动手）。"""
+        if event is not None and event.widget is not self.win:
+            return
+        if self._resize_job:
+            try:
+                self.win.after_cancel(self._resize_job)
+            except Exception:
+                pass
+        self._resize_job = self.win.after(180, self._apply_resize)
+
+    def _apply_resize(self):
+        self._resize_job = None
+        try:
+            w = self.win.winfo_width()
+        except Exception:
+            return
+        if w <= 1:
+            return
+        natural_w = max(1, int(1220 * self._base_scale))
+        target = set_scale(self._base_scale * (w / natural_w))
+        if abs(target - self._scale_now) < 0.06:
+            return                     # 变化太小不重建，避免抖动
+        self._scale_now = target
+        apply_theme(self.win, target)
+        self._rebuild_body()           # tk 控件不会自动改字号 → 重建内容区
+
+    def _rebuild_body(self):
+        for child in self._body.winfo_children():
+            child.destroy()
+        self._build_body()
 
     def _build(self):
         self._build_topbar()
@@ -121,8 +168,11 @@ class DashboardWindow:
         self.win.bind("<MouseWheel>",
                       lambda e: self._canvas.yview_scroll(int(-e.delta / 120), "units"))
         self._body = body
+        self._build_body()
 
-        pad = tk.Frame(body, background=COLORS["canvas_soft"])
+    def _build_body(self):
+        """内容区（可重复构建：窗口缩放后字号要跟着变，而 tk 控件不会自动改）。"""
+        pad = tk.Frame(self._body, background=COLORS["canvas_soft"])
         pad.pack(fill="both", expand=True, padx=SPACE["lg"], pady=SPACE["lg"])
         self._build_kpis(pad)
         self._build_trend(pad)
@@ -131,12 +181,20 @@ class DashboardWindow:
         hint(pad, "口径：接待＝机器人发出的回复条数（以回复为单位）；"
                   "自动解决率＝真答 ÷（真答＋转人工占位语）；中位响应含占位语。"
                   "数据只在本机，不上传。").pack(anchor="w", pady=(SPACE["sm"], 0))
+        # 缩放后所有子控件都是新的，得用当前数据重绘一遍
+        if self._stats is not None:
+            self._render_kpis()
+            self._draw_chart()
+            self._render_distribution()
+            self._render_unanswered()
+            self._render_guards()
 
     def _build_topbar(self):
         bar = tk.Frame(self.win, background=COLORS["canvas"])
         bar.pack(fill="x")
         inner = tk.Frame(bar, background=COLORS["canvas"])
         inner.pack(fill="x", padx=SPACE["lg"], pady=SPACE["md"])
+        self._topbar_inner = inner
 
         # ★ 先 pack 右侧那组（导出/刷新/时间范围）：Tk 的 pack 是**先 pack 的先占空间**，
         #   右侧最后 pack 的话一超宽就被裁掉（上一版「导出 CSV」和日期都是这么没的）
@@ -188,14 +246,15 @@ class DashboardWindow:
         if self._demo_on:
             if not getattr(self, "_demo_box", None):
                 self._demo_box = tk.Frame(self.win, background=COLORS["info_bg"])
+                # ★ 按钮先 pack：Tk 是先 pack 的先占空间，标签后 pack 才会被裁
+                #   （顶栏那次的教训一样）
+                ttk.Button(self._demo_box, text="退出示例", style="Ghost.TButton",
+                           command=self._exit_demo).pack(side="right", padx=SPACE["sm"])
                 tk.Label(self._demo_box,
-                         text="当前是示例数据（600 条离线评测回放），用来展示各块在讲什么"
-                              " —— 不是你的真实接待记录。",
+                         text="示例数据（600 条离线评测回放）· 不是你的真实接待记录",
                          font=font("small"), background=COLORS["info_bg"],
                          foreground=COLORS["info"], anchor="w").pack(
                     side="left", padx=SPACE["md"], pady=SPACE["sm"])
-                ttk.Button(self._demo_box, text="退出示例", style="Ghost.TButton",
-                           command=self._exit_demo).pack(side="right", padx=SPACE["sm"])
             self._demo_box.pack(fill="x", after=self._topbar_sep)
         elif getattr(self, "_demo_box", None):
             self._demo_box.pack_forget()
@@ -220,13 +279,13 @@ class DashboardWindow:
         section_title(head, "接待量与自动解决率").pack(side="left")
         self._trend_note = hint(head, "")
         self._trend_note.pack(side="right")
-        self._chart = tk.Canvas(body, height=132, background=COLORS["canvas"],
+        self._chart = tk.Canvas(body, height=px(132), background=COLORS["canvas"],
                                 highlightthickness=0, bd=0)
         self._chart.pack(fill="x", padx=SPACE["lg"], pady=(0, SPACE["lg"]))
         self._chart.bind("<Configure>", lambda e: self._draw_chart())
 
     def _build_two_panels(self, parent):
-        row = tk.Frame(parent, background=COLORS["canvas_soft"], height=330)
+        row = tk.Frame(parent, background=COLORS["canvas_soft"], height=px(330))
         # ★ 这两块**不参与纵向拉伸**：否则它们会把下面的"踩刹车"卡片挤出可视区
         #   （第一版就踩了：截图里底部那块直接看不见）
         row.pack(fill="x", pady=(0, SPACE["md"]))
@@ -268,9 +327,9 @@ class DashboardWindow:
         wrap.pack(fill="both", expand=True, padx=SPACE["lg"], pady=(0, SPACE["lg"]))
         cols = ("q", "n", "why")
         self._tree = ttk.Treeview(wrap, columns=cols, show="headings", height=11)
-        for cid, text, width, anchor in (("q", "客户原话", 168, "w"),
-                                         ("n", "次数", 44, "center"),
-                                         ("why", "转人工原因", 116, "w")):
+        for cid, text, width, anchor in (("q", "客户原话", px(168), "w"),
+                                         ("n", "次数", px(44), "center"),
+                                         ("why", "转人工原因", px(116), "w")):
             self._tree.heading(cid, text=text)
             self._tree.column(cid, width=width, minwidth=40, anchor=anchor,
                               stretch=(cid == "q"))
@@ -280,6 +339,20 @@ class DashboardWindow:
         self._tree.configure(yscrollcommand=sb.set)
         self._tree.bind("<Double-1>", lambda e: self._add_to_kb())
         self._tree.bind("<<TreeviewSelect>>", lambda e: self._show_reason())
+        # 列宽按面板实际宽度按比例分配（不是写死像素）——窗口一变还能保持协调
+        self._tree_wrap = wrap
+        wrap.bind("<Configure>", lambda e: self._fit_tree_columns(e.width))
+
+    def _fit_tree_columns(self, width: int):
+        """按面板宽度分配三列：原话 46% / 次数 14% / 原因 40%。"""
+        if width <= 1:
+            return
+        for cid, ratio, minw in (("q", 0.46, px(120)), ("n", 0.14, px(40)),
+                                 ("why", 0.40, px(90))):
+            try:
+                self._tree.column(cid, width=max(minw, int(width * ratio)))
+            except Exception:
+                pass
 
     def _build_guards(self, parent):
         c = card(parent)
@@ -322,6 +395,23 @@ class DashboardWindow:
                 else f"{self._start.strftime(fmt)} ~ {self._end.strftime(fmt)}")
         self._range_label.configure(text=f"{span}（{days} 天）")
 
+    def _fit_topbar(self):
+        """顶栏放不下时先藏日期标签 —— 趋势图右上角也有时间提示，不会丢信息。
+
+        （写死尺寸那版就是这里出问题：高 DPI 下「近 7 天/自定义」直接被裁掉。）
+        """
+        try:
+            self.win.update_idletasks()
+            avail = self.win.winfo_width() - px(2 * SPACE["lg"]) - px(8)
+            need = self._topbar_inner.winfo_reqwidth()
+            shown = bool(self._range_label.winfo_ismapped())
+        except Exception:
+            return
+        if need > avail and shown:
+            self._range_label.pack_forget()
+        elif need < avail - px(70) and not shown:
+            self._range_label.pack(side="right", padx=(0, SPACE["md"]))
+
     # ── 刷新与绘制 ─────────────────────────────────────────────────────
 
     def refresh(self):
@@ -334,6 +424,7 @@ class DashboardWindow:
         self._render_distribution()
         self._render_unanswered()
         self._render_guards()
+        self._fit_topbar()
 
     def _render_kpis(self):
         st = self._stats
@@ -345,7 +436,7 @@ class DashboardWindow:
              "%", f"真答 {st.auto} · 转人工 {st.hold}", "primary"),
             ("待人工", str(st.pending_now), "条", "实时积压，与时间范围无关", "warning"),
             ("中位响应", _fmt_seconds(st.median_reply_seconds), "秒",
-             "含转人工占位语", "ink"),
+             "含占位语", "ink"),
         ]
         for card_widget, (label, value, unit, note, tone) in zip(self._kpi_cards, values):
             for child in card_body(card_widget).winfo_children():
@@ -403,6 +494,8 @@ class DashboardWindow:
         cv.create_line(pad_l, h - pad_b, w - 12, h - pad_b, fill=COLORS["hairline"])
         # 柱：接待量（靛蓝浅色）；线：自动解决率
         pts = []
+        last_label_x = None
+        min_gap = px(96)          # 两个横轴标签之间的最小间距（按缩放走）
         for i, b in enumerate(st.buckets):
             x = pad_l + slot * i + slot / 2
             bar_h = (b.replies / max_v) * plot_h
@@ -410,16 +503,22 @@ class DashboardWindow:
                 cv.create_rectangle(x - bar_w / 2, h - pad_b - bar_h,
                                     x + bar_w / 2, h - pad_b,
                                     fill=COLORS["primary_subtle"], outline="")
-                cv.create_text(x, h - pad_b - bar_h - 8, text=str(b.replies),
+                cv.create_text(x, h - pad_b - bar_h - px(8), text=str(b.replies),
                                fill=COLORS["ink_mute"], font=font("micro"))
             if b.solve_rate is not None:
                 y = h - pad_b - b.solve_rate * plot_h
                 pts.extend([x, y])
-            # 轴标签：太多就隔几个画一个
-            step = max(1, n // 8)
-            if i % step == 0 or i == n - 1:
-                cv.create_text(x, h - pad_b + 10, text=b.label,
+            # 横轴标签：**按实际间距决定要不要画**（写死"隔几个画一个"在窗口变宽后
+            # 仍会挤成一团，比如 24 个小时标签全挤在一起）
+            if last_label_x is None or (x - last_label_x) >= min_gap:
+                cv.create_text(x, h - pad_b + px(10), text=b.label,
                                fill=COLORS["ink_faint"], font=font("micro"))
+                last_label_x = x
+        if last_label_x is not None and (pad_l + slot * (n - 1) + slot / 2
+                                         - last_label_x) >= min_gap * 0.6:
+            cv.create_text(pad_l + slot * (n - 1) + slot / 2, h - pad_b + px(10),
+                           text=st.buckets[-1].label, fill=COLORS["ink_faint"],
+                           font=font("micro"))
         if len(pts) >= 4:
             cv.create_line(*pts, fill=COLORS["primary"], width=2, smooth=True)
         else:
@@ -453,8 +552,11 @@ class DashboardWindow:
                     anchor="w", pady=(SPACE["xs"], 0))
             return
         items = [kv for kv in st.by_path.most_common(10)]
+        # 条形宽度按面板实际宽度取比例（不写死像素，窗口变宽它就跟着变宽）
+        panel_w = self._dist_host.winfo_width()
+        bar_w = max(px(60), int((panel_w if panel_w > 1 else px(300)) * 0.26))
         for name, count in items:
-            row = bar_row(self._dist_host, name, count, total,
+            row = bar_row(self._dist_host, name, count, total, width=bar_w,
                           color=(COLORS["primary_soft"] if name in NEUTRAL_PATHS
                                  else COLORS["warning"]))
             row.pack(fill="x", pady=1)

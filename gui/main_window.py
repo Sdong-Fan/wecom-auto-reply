@@ -19,7 +19,7 @@ from datetime import datetime
 from tkinter import ttk, messagebox
 from typing import Callable, Dict, List, Optional
 
-from gui.theme import COLORS, SPACE, apply_theme, font
+from gui.theme import COLORS, SPACE, apply_theme, detect_dpi_scale, font, px
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class MainWindow:
         self.root.title("企业微信智能客服")
         # 先给个大致位置（建控件期间别在屏幕角落闪）
         sw = self.root.winfo_screenwidth()
-        self.root.geometry(f"760x320+{sw - 780}+10")
+        self.root.geometry(f"{px(760)}x{px(320)}+{max(0, sw - px(780))}+{px(10)}")
         self.root.attributes('-topmost', True)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -120,17 +120,23 @@ class MainWindow:
         self._fit_window(sw)
 
     def _fit_window(self, screen_w: int):
-        """让窗口刚好装得下内容，并贴在屏幕右上角。"""
+        """让窗口刚好装得下内容，并贴在屏幕右上角。
+
+        ★ 不要再封顶成固定像素：屏幕缩放 125%/150% 时字号会跟着放大，
+          内容需要的宽度超过那个"顶"，按钮就会被裁掉（实测「设置」被切）。
+          所以只受**屏幕尺寸**约束。
+        """
         try:
             self.root.update_idletasks()
             need_w = self.root.winfo_reqwidth()
             need_h = self.root.winfo_reqheight()
+            screen_h = self.root.winfo_screenheight()
         except Exception:
             return
-        w = max(760, min(1180, need_w + 8))
-        h = max(320, min(760, need_h + 8))
-        x = max(0, screen_w - w - 20)
-        self.root.geometry(f"{w}x{h}+{x}+10")
+        w = max(px(760), min(need_w + px(8), screen_w - px(40)))
+        h = max(px(320), min(need_h + px(8), screen_h - px(80)))
+        x = max(0, screen_w - w - px(20))
+        self.root.geometry(f"{w}x{h}+{x}+{px(10)}")
 
     def _create_header(self):
         """创建顶部标题栏（按 gui/theme.py 的设计系统：白底 + 发丝线分隔）"""

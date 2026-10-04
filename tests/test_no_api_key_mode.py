@@ -181,6 +181,64 @@ def test_start_allowed_tolerates_broken_guard():
         types.SimpleNamespace(can_start=None))[0] is True
 
 
+def _bare_window(**attrs):
+    """造一个"半成品" MainWindow（不建 Tk 窗口），只测逻辑。
+
+    必须用 __new__ 而不是 SimpleNamespace —— 后者没有 _start_allowed/_refuse_start 这些方法。
+    """
+    from gui.main_window import MainWindow
+    w = MainWindow.__new__(MainWindow)
+    for k, v in attrs.items():
+        setattr(w, k, v)
+    return w
+
+
+class _Lbl:
+    def __init__(self):
+        self.text = ""
+
+    def config(self, **kw):
+        if "text" in kw:
+            self.text = kw["text"]
+
+
+def test_toggle_pause_stays_stopped_when_guard_refuses(monkeypatch):
+    """核心断言：守卫说不 → 点「开始」之后**仍然是未启动**，且没有触发 on_resume。"""
+    from gui import main_window as mw
+
+    monkeypatch.setattr(mw.messagebox, "askyesno", lambda *a, **k: False)
+    started, banners = [], []
+    w = _bare_window(
+        can_start=lambda: (False, "还没配模型接口，不能开始。"),
+        _paused=True, _pause_btn=_Lbl(), _status_label=_Lbl(),
+        on_settings=None,
+        on_resume=lambda: started.append("resume"),
+        on_pause=lambda: started.append("pause"),
+        set_banner=lambda text, level=None: banners.append((text, level)),
+    )
+    w._toggle_pause()
+
+    assert w._paused is True, "守卫拒绝后不能变成运行中"
+    assert w._pause_btn.text == "开始", "按钮文字不能变成「停止」"
+    assert started == [], "不能触发 on_resume"
+    assert banners and banners[-1][1] == "error"
+
+
+def test_toggle_pause_starts_when_guard_allows():
+    started = []
+    w = _bare_window(
+        can_start=lambda: (True, ""),
+        _paused=True, _pause_btn=_Lbl(), _status_label=_Lbl(),
+        on_settings=None,
+        on_resume=lambda: started.append("resume"),
+        on_pause=lambda: started.append("pause"),
+        set_banner=lambda text, level=None: None,
+    )
+    w._toggle_pause()
+    assert w._paused is False
+    assert started == ["resume"]
+
+
 # ── 4. 文档要和新口径一致 ──────────────────────────────────────────────
 
 def test_usage_doc_describes_no_key_mode_correctly():

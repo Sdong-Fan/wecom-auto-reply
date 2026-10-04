@@ -13,6 +13,11 @@ from rag import learn, learn_store as ls
 def base(tmp_path, monkeypatch):
     d = tmp_path / "learned"
     monkeypatch.setattr(ls, "LEARN_DIR", d)
+    # ★ 不读仓库里的 config.json：学习开关是用户可改的（关掉也合法），
+    #   用例不该跟着本机配置时红时绿。这里显式当作"开着"，
+    #   要测"关掉"的用例自己传 cfg（见 test_capture_disabled_by_switch）。
+    monkeypatch.setattr(ls, "_load_cfg",
+                        lambda: {"kb": {"learn": {"enabled": True}}})
     return d
 
 
@@ -712,3 +717,35 @@ def test_learning_uses_responder_qdrant():
     s = _main_src()
     block = s[s.index("def _commit_learn"):s.index("def _drain_learn_queue")]
     assert 'getattr(responder, "qdrant", None)' in block
+
+
+# ── 出厂默认关闭：文案与配置要一致（2026-10-04 定的产品口径） ────────────
+# 决定"默认关"没问题，但**不能说成开着**：发布说明写着"人工改稿确认后它还会学"，
+# 而 config.json 里是 false，用户开箱就用不上，会以为功能坏了。
+
+def _kb_dialog_src() -> str:
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    return (root / "gui/kb_dialog.py").read_text(encoding="utf-8")
+
+
+def test_config_ships_with_learning_off():
+    import json
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    cfg = json.loads((root / "config.json").read_text(encoding="utf-8"))
+    assert cfg["kb"]["learn"]["enabled"] is False
+    assert "默认" in cfg["kb"]["learn"]["_comment"], "配置注释要说清这是默认值"
+
+
+def test_kb_dialog_says_default_off():
+    s = _kb_dialog_src()
+    assert "出厂默认" in s
+    assert "学习开关" in s, "顶部要一直显示开关状态，不能只在切换时闪一下"
+
+
+def test_kb_dialog_toggle_updates_the_state_line():
+    """切换后要重跑 _learn_load 刷新状态行，不能只在 _toggle_learn 里写死一句。"""
+    s = _kb_dialog_src()
+    block = s[s.index("def _toggle_learn"):s.index("def _learn_preview")]
+    assert "self._learn_load()" in block

@@ -1,8 +1,10 @@
 """提示词外置 + 前端编辑：改完立即生效，且不能被改坏。
 
-两个必须挡住的事：
-1. 占位符 `{context}` 被删 → `str.format` 抛 KeyError → 生成回复直接崩
-2. 安全规则被删 → guard 把大量回复拦成"需要人工处理"，用户以为程序坏了
+必须挡住的三件事：
+1. **写了程序不认识的花括号**（`{foo}` / 正文里随手一个 `{`）→ `str.format`
+   抛 KeyError → 生成报错 → 机器人变成"全部转人工"，而且界面不报错
+2. `{context}` 被删 → 知识片段填不进去，机器人只能凭印象答
+3. 安全规则被删 → guard 把大量回复拦成"需要人工处理"，用户以为程序坏了
 """
 import json
 from pathlib import Path
@@ -80,6 +82,62 @@ def test_corrupt_file_on_disk_falls_back_instead_of_crashing():
 
 def test_smalltalk_has_no_required_placeholder():
     assert ps.validate("smalltalk", "随便写点什么")[0] is True
+
+
+# ── 校验：未知花括号必须在**保存时**拦住（运行时报错就晚了） ──────────────
+# 背景：validate 只查"必需占位符在不在"，所以 {contex} 拼错、正文里打个 {，
+# 都能存进文件；之后每次 build_prompt 的 .format() 抛 KeyError，
+# responder 兜成"LLM错误 → 转人工"，用户只看到机器人突然什么都不答了。
+
+def test_unknown_placeholder_is_rejected():
+    ok, why = ps.validate("system", "写点东西 {context} 还有 {foo}")
+    assert ok is False
+    assert "{foo}" in why, "要指出到底是哪个花括号"
+    assert "{context}" in why, "要告诉他能用哪些"
+
+
+def test_stray_brace_in_body_is_rejected():
+    """正文里随手一个 { 也是 KeyError（实测 format 会报 ' 100 '）。"""
+    assert ps.validate("system", "价格表 { 100 } 加 {context}")[0] is False
+
+
+def test_unknown_placeholder_does_not_reach_disk():
+    ok, _ = ps.set_prompt("system", "拼错的 {contex} 加 {context}")
+    assert ok is False
+    assert ps.is_customized("system") is False, "校验不过就不能落盘"
+
+
+def test_unknown_placeholder_on_disk_falls_back():
+    """绕过界面直接改文件也不行 —— 读取时同样校验，坏了就回退出厂值。"""
+    ps.PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
+    (ps.PROMPTS_DIR / "system.md").write_text(
+        "手写的 {typo} 加 {context}", encoding="utf-8")
+    assert ps.get("system") == ps._default("system")
+
+
+def test_allowed_placeholders_pass():
+    ok, why = ps.validate(
+        "system", "用 {context} 和 {conversation_history} 和 {tone_samples}")
+    assert ok is True, why
+
+
+def test_smalltalk_allows_only_tone_samples():
+    assert ps.validate("smalltalk", "闲聊 {tone_samples}")[0] is True
+    assert ps.validate("smalltalk", "闲聊 {typo}")[0] is False
+
+
+def test_unformatted_prompts_allow_any_brace():
+    """占位语/欢迎语不过 format，正文里有花括号无所谓 —— 别误拦。"""
+    for name in ("hold", "welcome", "tone_samples", "nontext"):
+        assert ps.validate(name, "正文里有个 { 花括号")[0] is True, name
+
+
+def test_format_never_raises_for_saved_prompts():
+    """回归：凡是 validate 放过的 system 提示词，.format() 都不许抛异常。"""
+    ps.set_prompt("system", "只用 {context} 和 {tone_samples}")
+    text = ps.get("system").format(
+        context="知识片段", conversation_history="", tone_samples="口吻")
+    assert "知识片段" in text
 
 
 # ── 口吻样本解析 ──────────────────────────────────────────────────────

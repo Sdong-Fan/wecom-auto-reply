@@ -9,9 +9,14 @@
 
 **两处必须挡住的坑**（都是实测会把人搞崩的）：
 
-1. **占位符**：`system` 提示词里有 `{context}`，程序要靠它把知识片段填进去。
-   用户删掉 → `str.format` 抛 KeyError → 回复生成直接崩。
-   所以保存前校验占位符，缺了就不让存。
+1. **占位符**：有两类坑，方向相反 ——
+   * **写了程序不认识的花括号**（`{contex}` 拼错、正文里随手打了个 `{`）
+     → `str.format` 抛 KeyError → 回复生成报错 → **全部转人工**。
+     这个最坑：程序不崩、界面不报，用户只看到"机器人突然什么都不答了"。
+     所以保存前就把未知占位符拦掉（见 `FORMATTED`）。
+   * **删掉 `{context}`** → 不报错，但知识片段填不进去，机器人只能凭印象答。
+     所以它是必需占位符，缺了不让存。
+   （两者都是**保存时报错**，不是运行时报错 —— 失败要吵，不能静默降级。）
 
 2. **安全规则**：提示词里的"不许编造/用词必须确定/不暴露 AI"是**受保护区**。
    用户手一抖删了，guard 会把大量回复拦成"需要人工处理"，
@@ -141,16 +146,45 @@ def parse_nontext_acks(text: Optional[str] = None) -> dict:
     return out
 
 
+# 会被 `str.format()` 填充的提示词：名字 → **允许出现**的占位符。
+# 不在这张表里的提示词（占位语 / 口吻样本 / 欢迎语 / 非文本应答）不过 format，
+# 所以正文里出现花括号无所谓。
+FORMATTED = {
+    "system": ("context", "conversation_history", "tone_samples"),
+    "smalltalk": ("tone_samples",),
+}
+
+# 匹配一个花括号占位符（不跨花括号，所以 {{ 转义写法和嵌套都不会误报）
+_PLACEHOLDER_RE = re.compile(r"\{([^{}]*)\}")
+
+
 def validate(name: str, text: str) -> Tuple[bool, str]:
     """保存前校验。返回 (是否通过, 原因)。"""
     if name not in PROMPTS:
         return False, f"未知的提示词: {name}"
     if not (text or "").strip():
         return False, "内容不能为空"
+
+    allowed = FORMATTED.get(name)
+    if allowed is not None:
+        known = set(allowed)
+        unknown = [m.group(1) for m in _PLACEHOLDER_RE.finditer(text)
+                   if m.group(1) not in known]
+        if unknown:
+            bad = "、".join(f"{{{u}}}" for u in dict.fromkeys(unknown))
+            # 这句里要显示成对的花括号，用拼接避开 f-string 的转义地狱
+            hint = ("（正文里确实想显示一个花括号的话，"
+                    "要写成 " + "{{" + " 和 " + "}}" + "。）")
+            return False, (
+                f"出现了程序不认识的花括号 {bad} —— 存下去每次生成都会报错，"
+                f"机器人会变成「全部转人工」，而且界面不报错。\n"
+                f"「{PROMPTS[name][1]}」里只能用："
+                f"{'、'.join('{%s}' % a for a in allowed)}。\n" + hint)
+
     for ph in PROMPTS[name][2]:
         if ph not in text:
-            return False, (f"缺少必需占位符 {ph} —— 程序要靠它把知识片段填进去，"
-                           f"删掉会导致生成回复时报错。请把它加回去。")
+            return False, (f"缺少必需占位符 {ph} —— 程序要把命中的知识片段填在这个位置，"
+                           f"删掉它机器人就只能凭印象回答。请把它加回去。")
     return True, ""
 
 

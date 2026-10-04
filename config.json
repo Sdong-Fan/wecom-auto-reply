@@ -11,7 +11,7 @@
     "learn": {
       "enabled": false,
       "max_items": 50,
-      "_comment": "从人工改稿学习：enabled=总开关；max_items=每类最多留多少条（超出丢最旧）"
+      "_comment": "从人工改稿学习：enabled=总开关，**出厂默认 false（关闭）**，要在「知识库→学到的」页勾上「自动学习」才开始学；max_items=每类最多留多少条（超出丢最旧）"
     }
   },
   "_send_target_verify_comment": "发送前\"确认当前打开的就是目标会话\"的校验强度：strict=名字必须完整包含；lenient=允许 OCR 错一两个字（按字符命中率 ≥0.75）；off=不校验（省 1~2 秒，但会失去防发错人）。",

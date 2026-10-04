@@ -139,9 +139,12 @@ class KbDialog:
         self._learn_info = ttk.Label(top, text="", foreground=COLORS["ink_mute"])
         self._learn_info.pack(side=tk.LEFT, padx=10)
 
-        tip = ("只自动学「怎么说话」；人工回复里带出的**新说法**（价格/时效/政策）"
-               "一律要你确认才进资料库 —— 不然一次性的「这次给你免押」会变成通用政策。")
-        ttk.Label(page, text=tip, foreground=COLORS["warning"]).pack(anchor="w", padx=12)
+        tip = ("**出厂默认是关闭的** —— 想让它开始学，先勾上左边那个框。\n"
+               "开起来之后只自动学「怎么说话」；人工回复里带出的**新说法**"
+               "（价格/时效/政策）一律要你确认才进资料库 —— "
+               "不然一次性的「这次给你免押」会变成通用政策。")
+        ttk.Label(page, text=tip, foreground=COLORS["warning"],
+                  wraplength=780, justify="left").pack(anchor="w", padx=12)
 
         # 待确认的新知识（最重要，放最上面）
         f_facts = ttk.LabelFrame(
@@ -212,10 +215,13 @@ class KbDialog:
                                                            f.get("ts", "")))
             self._fact_map[k] = f
         c = ls.counts()
+        on = ls.enabled(self.cfg)
         self._learn_info.config(
-            text=(f"语气规则 {c['rules']} 条｜口吻样本 {c['tones']} 条｜"
+            text=(f"学习开关：{'已开启' if on else '未开启（出厂默认是关的）'}"
+                  f"｜语气规则 {c['rules']} 条｜口吻样本 {c['tones']} 条｜"
                   f"待确认 {c['pending_facts']} 条｜别学 {c['blocked']} 条｜"
-                  f"采纳过 {c['accepts']} 个问题"))
+                  f"采纳过 {c['accepts']} 个问题"),
+            foreground=COLORS["success"] if on else COLORS["warning"])
 
     # ── 学到的页：动作 ────────────────────────────────────────────────
 
@@ -229,9 +235,9 @@ class KbDialog:
         except Exception as e:
             messagebox.showerror("保存失败", f"改不了配置：{e}")
             return
-        self._learn_info.config(
-            text=("已开启自动学习" if want else "已关闭自动学习（已学到的还会继续用）"),
-            foreground=COLORS["success"] if want else COLORS["warning"])
+        # 走一遍 _learn_load，让"开关状态 + 条数"这一行和实际配置保持一致
+        # （只在这里写死一句话的话，下次刷新就被条数覆盖掉了）
+        self._learn_load()
 
     def _learn_preview(self):
         """把真正注入给 AI 的那段显示出来 —— 学偏了要能一眼看出来。"""
@@ -862,9 +868,11 @@ class KbDialog:
         self._hint = ttk.Label(top, text="", foreground=COLORS["ink_mute"])
         self._hint.pack(side=tk.LEFT, padx=10)
 
-        tip = ("提示：`{context}` 和 `{conversation_history}` 是程序填内容的占位符，"
-               "删掉会导致生成回复报错（保存时会拦住）。")
-        ttk.Label(page, text=tip, foreground=COLORS["warning"]).pack(anchor="w", padx=12)
+        tip = ("提示：`{context}`、`{conversation_history}`、`{tone_samples}` 是程序填内容的"
+               "占位符，别改名。写成别的花括号（比如 `{contex}`）保存时会被拦住 —— "
+               "存下去会让机器人变成「全部转人工」。")
+        ttk.Label(page, text=tip, foreground=COLORS["warning"],
+                  wraplength=600, justify="left").pack(anchor="w", padx=12)
 
         # 编辑区
         box = ttk.Frame(page)

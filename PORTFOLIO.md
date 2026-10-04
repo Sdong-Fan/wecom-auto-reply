@@ -38,7 +38,7 @@
 | 2（3 分钟） | [`docs/事故-回复错人与内部信号外泄.md`](docs/事故-回复错人与内部信号外泄.md) | 一次真实事故的完整复盘：**发错人 + 内部信号外泄 + 不重试**，三个独立根因与三处修复 |
 | 3（4 分钟） | [`scripts/eval_set.py`](scripts/eval_set.py) + [`docs/资料库查看与编辑.md`](docs/资料库查看与编辑.md) | 我给自己造的"尺子"（46 题评测集）与"该补什么资料"的排行榜 |
 | 4（3 分钟） | [`rag/guard.py`](rag/guard.py) | 护栏实现：数字校验、型号校验、越界拒答、不确定就转人工 |
-| 5（3 分钟） | [`tests/`](tests/) 与 [`scripts/threshold_scan.py`](scripts/threshold_scan.py) | 1403 个测试（含 4 次事故回归）与阈值扫描脚本 |
+| 5（3 分钟） | [`tests/`](tests/) 与 [`scripts/threshold_scan.py`](scripts/threshold_scan.py) | 1444 个测试（含 4 次事故回归）与阈值扫描脚本 |
 
 ---
 
@@ -90,7 +90,7 @@
 | 问题集中度 | **99%（76/77）落在 7 类** | 真实客户消息分类 |
 | 资料库规模 | **237 条资料块** | Qdrant collection |
 | 单店成本（估算） | ≈ **¥12/月** | 估算：每天 100 条 × 30 天；OCR 与检索本地跑 |
-| 自动化测试 | **1403 个**（本机 1398 passed / 5 skipped） | `SKIP_EMBED_TESTS=1 python -m pytest tests/ -q` |
+| 自动化测试 | **1444 个**（本机 1440 passed / 4 skipped） | `SKIP_EMBED_TESTS=1 python -m pytest tests/ -q` |
 
 > 竞品对照：同类客服 SaaS 的客服名额约 **550 元/客服/年** 起
 > （公开帮助文档里的报价，以官网价格页为准，这里只作量级对照）。
@@ -135,7 +135,7 @@ gui/                    界面：主窗口、知识库、设置、待人工工�
 gateway/                企业微信客服 API 通道（可选）
 pipeline/               资料解析（txt/md/csv/Excel/Word）与嵌入
 docs/                   设计文档与事故复盘（含 4 次真实事故的根因与修复）
-tests/                  1403 个测试（含事故回归）
+tests/                  1444 个测试（含事故回归）
 ```
 
 ---

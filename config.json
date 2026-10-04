@@ -251,5 +251,21 @@
     "on_first_contact": true,
     "cooldown_seconds": 21600,
     "_comment": "on_enter_session=API模式：客户进入会话时自动发欢迎语（截图模式做不到这个）；on_first_contact=两种模式通用：第一次跟某个客户说话前先招呼一句；cooldown_seconds=API模式同一人多久内只招呼一次。文案在 知识库→提示词→欢迎语"
+  },
+  "judge": {
+    "engine": "rules",
+    "_engine_comment": "「该不该答」这一处用哪个引擎判断：rules=规则层（默认，线上现状，不联网）；shadow=影子模式（规则决定行为，同时问一次 Jev 只落 logs/jev_shadow.jsonl 取证，零风险）；jev=灰度（Jev 决定，但它只有否决权——说“要回”仍要过检索/护栏/阈值三关，失败或没配 key 自动退回规则层）。",
+    "ask_when": "rules_say_reply",
+    "_ask_when_comment": "分级调用：rules_say_reply=只在规则层说“要回”时才问 Jev（默认，省钱省那 1 秒；规则说不用回的本就不生成）；always=每条都问（能救“规则说不回但其实该答”，但每条都花时间/钱）。",
+    "send_history": false,
+    "_send_history_comment": "发不发对话历史给 Jev。默认 false=只发客户当前这一句，和主流程“对话不出本机”的口径一致；打开会多外发内容，想清楚再开。",
+    "jev": {
+      "provider": "bocha",
+      "_provider_comment": "判断模型来源，协议相同只是地址/模型不同：bocha=博查 Jev（限时免费，默认）、typesafe=TypeSafe 直连、vercel=Vercel AI Gateway、opencode=OpenCode Zen、openrouter=OpenRouter。密钥放 .env 的 JEV_API_KEY，不要写这里。",
+      "model": "",
+      "base_url": "",
+      "timeout_seconds": 6,
+      "_timeout_comment": "判断超时就退回规则层。客户在等，别设太大；默认 6 秒。"
+    }
   }
 }

@@ -28,6 +28,7 @@ from rag.guard import (classify_and_dispatch, check_retrieval, high_threshold,
                        HEDGE_PHRASES, out_of_scope, must_escalate,
                        unsafe_promise, deferral_phrase, decision_path_of)
 from rag.judge import should_reply, is_low_information
+from rag.jev_judge import judge_should_reply
 from rag.local_answers import answer_locally, now_line
 from rag.smalltalk import classify_message
 from rag.generator import generate_smalltalk_reply
@@ -321,15 +322,25 @@ class Responder:
                 dispatch_level="human_handle",
             )
 
-        # ── 该不该答（规则判断层）─────────────────────────────
+        # ── 该不该答（判断层：规则 / 影子 / Jev 灰度）─────────────────
         # 收尾/确认/感谢语不需要回：检索分数再高也不该回，避免刷屏。
-        # 判断偏保守（拿不准就当作要回），见 rag/judge.py。
-        reply_needed, no_reason = should_reply(text)
+        # 默认走 rag/judge.py 的规则层（保守：拿不准当作要回）。
+        # 灰度版可换成 Jev 判断模型，见 rag/jev_judge.py —— **它只有否决权**：
+        # 说"要回"也只是放行到下面的检索/护栏/阈值三关，不能凭一句话让回复发给客户。
+        reply_needed, no_reason, judge_meta = await judge_should_reply(
+            text, self._config)
+        if judge_meta.get("engine", "rules") != "rules":
+            logger.info(
+                "判断层[%s] decided_by=%s 规则=%s jev=%s 一致=%s",
+                judge_meta.get("engine"), judge_meta.get("decided_by"),
+                judge_meta.get("rules"), judge_meta.get("jev"),
+                judge_meta.get("agree"))
         if not reply_needed:
             logger.info(f"无需回复: {no_reason}")
             return ReplyResult(
                 success=False, reason=no_reason,
                 dispatch_level="no_reply",
+                decision_path=judge_meta.get("decision_path", ""),
             )
 
         # ── 越界请求：要凭据 / 让我算题背诗 / 试图改我的指令 ──────────

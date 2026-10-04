@@ -260,13 +260,20 @@ def apply_theme(root: tk.Misc, scale_factor: float | None = None) -> ttk.Style:
                     troughcolor=c["canvas_soft"], bordercolor=c["canvas_soft"],
                     arrowcolor=c["ink_mute"], borderwidth=0)
 
-    # ── 标签页 ──────────────────────────────────────────────────────────
+    # ── 标签页 + 分区框 ─────────────────────────────────────────────────
+    # 这两个是"所有对话框共用"的容器：在 theme 里统一定义一次，
+    # 知识库 / 学到的 / 待人工 等面板就一起升级了（不然每个文件都要改一遍）
     style.configure("TNotebook", background=c["canvas_soft"], borderwidth=0)
     style.configure("TNotebook.Tab", background=c["canvas_sunken"],
-                    foreground=c["ink_mute"], padding=(px(14), px(7)), font=font("body"))
+                    foreground=c["ink_mute"], padding=(px(14), px(7)),
+                    font=font("body"))
     style.map("TNotebook.Tab",
               background=[("selected", c["canvas"])],
               foreground=[("selected", c["ink"])])
+    style.configure("TLabelframe", background=c["canvas"], bordercolor=c["hairline"],
+                    borderwidth=1, relief="solid", padding=px(6))
+    style.configure("TLabelframe.Label", background=c["canvas"],
+                    foreground=c["ink"], font=font("h3", True))
 
     return style
 
@@ -379,3 +386,42 @@ def divider(parent, *, pady: int = SPACE["md"]) -> tk.Frame:
     line = tk.Frame(parent, height=1, background=COLORS["hairline"])
     line.pack(fill="x", pady=px(pady))
     return line
+
+
+def scroll_area(parent, *, bg: str | None = None) -> tuple[tk.Frame, tk.Frame]:
+    """可滚动内容区：返回 ``(外层, 内容容器)``。
+
+    为什么需要它：设置面板内容比窗口高时，底下那几栏**用户根本看不到**
+    （实测「企业微信 API 模式」的凭据栏就是这么消失的 —— 而窗口还设了不可缩放，
+    等于死路）。凡是"内容可能超出窗口"的面板都该用它。
+    鼠标滚轮只在这个区域内生效，不抢别的窗口。
+    """
+    bg = bg or COLORS["canvas_soft"]
+    outer = tk.Frame(parent, background=bg)
+    canvas = tk.Canvas(outer, background=bg, highlightthickness=0, bd=0)
+    vsb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=vsb.set)
+    vsb.pack(side="right", fill="y")
+    canvas.pack(side="left", fill="both", expand=True)
+    inner = tk.Frame(canvas, background=bg)
+    wid = canvas.create_window((0, 0), window=inner, anchor="nw")
+    inner.bind("<Configure>",
+               lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.bind("<Configure>",
+                lambda e: canvas.itemconfigure(wid, width=e.width))
+
+    def _wheel(ev):
+        canvas.yview_scroll(int(-ev.delta / 120), "units")
+
+    canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _wheel))
+    canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+    return outer, inner
+
+
+def dialog_geometry(win: tk.Misc, width: int, height: int) -> str:
+    """对话框尺寸：按缩放算，并**夹在屏幕内**（高 DPI 下别把窗口顶出屏幕）。"""
+    w = min(px(width), win.winfo_screenwidth() - px(60))
+    h = min(px(height), win.winfo_screenheight() - px(120))
+    x = max(0, (win.winfo_screenwidth() - w) // 2)
+    y = max(0, (win.winfo_screenheight() - h) // 3)
+    return f"{w}x{h}+{x}+{y}"

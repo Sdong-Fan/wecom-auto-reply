@@ -52,16 +52,61 @@ SECRET_KEYS = ("LLM_API_KEY", "WECOM_CORP_ID", "WECOM_KF_SECRET", "WECOM_OPEN_KF
 _KEY_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
 # 软件选择 → (id, 显示名, channel, profile, 备注)
-# 是否可选**不写死在这张表里**：只要 profiles/<profile>.json 存在就能选
-# （见 software_options）。这样标定完微信 PC，面板里它自动从灰变亮。
-SOFTWARE_CHOICES = [
+# ★ 这张表只是**内置推荐项**，不是"只支持这三种"：
+#   profiles/ 目录里任何 *.json 都会被自动发现并出现在设置面板里
+#   （见 discover_profiles / all_choices）—— 接新软件不用改代码，
+#   跑一次 scripts/calibrate_chat_app.py 生成 profile 就多一个选项。
+BUILTIN_CHOICES = [
     ("wecom_screenshot", "企业微信 · 截图模式", "screenshot", "wecom", ""),
     ("wecom_api", "企业微信 · API 模式", "wecom_api", "wecom", ""),
     ("wechat_pc", "微信 PC · 截图模式", "screenshot", "wechat_pc",
      "还没标定：先跑 scripts/calibrate_chat_app.py 生成 profiles/wechat_pc.json"),
 ]
 
+# 兼容旧名字（测试与其它模块按这个名字引用）
+SOFTWARE_CHOICES = BUILTIN_CHOICES
+
 PROFILES_DIR = HERE / "profiles"
+
+
+def _profile_display_name(profile_id: str) -> str:
+    """从 profile 文件里取个好听的名字（没有就用文件名）。"""
+    p = PROFILES_DIR / f"{profile_id}.json"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return profile_id
+    for key in ("display_name", "name"):
+        if data.get(key):
+            return str(data[key])
+    win = data.get("window") or {}
+    hint = win.get("title_hint") or win.get("prefer_title")
+    return f"{hint}" if hint else profile_id
+
+
+def discover_profiles() -> list:
+    """扫 profiles/ 目录，返回**内置项之外**的 profile：[(id, 显示名, profile_id)]。
+
+    跳过 .template（那是给人抄的模板）与内置项已经用到的 profile。
+    """
+    used = {prof for _sid, _l, _ch, prof, _n in BUILTIN_CHOICES if prof}
+    out = []
+    if not PROFILES_DIR.is_dir():
+        return out
+    for f in sorted(PROFILES_DIR.glob("*.json")):
+        pid = f.stem
+        if pid in used or f.name.endswith(".template"):
+            continue
+        out.append((f"profile:{pid}", f"其它软件 · {_profile_display_name(pid)}", pid))
+    return out
+
+
+def all_choices() -> list:
+    """内置项 + 自动发现的 profile，统一成与 BUILTIN_CHOICES 相同的五元组。"""
+    out = list(BUILTIN_CHOICES)
+    for sid, label, pid in discover_profiles():
+        out.append((sid, label, "screenshot", pid, ""))
+    return out
 
 
 def profile_available(profile_id: str) -> bool:
@@ -74,7 +119,7 @@ def profile_available(profile_id: str) -> bool:
 def software_options() -> list:
     """设置面板用：[(id, 显示名, 可选?, 备注), …]。不可选时备注一定有内容。"""
     out = []
-    for sid, label, _ch, prof, note in SOFTWARE_CHOICES:
+    for sid, label, _ch, prof, note in all_choices():
         ok = profile_available(prof)
         if ok:
             out.append((sid, label, True, ""))
@@ -161,7 +206,7 @@ def software_from_config(cfg: dict) -> str:
     """config → 当前选中的软件 id（面板高亮用）。"""
     channel = str(cfg.get("channel", "screenshot")).lower()
     profile = str(cfg.get("profile", "") or "")
-    for sid, _label, ch, prof, _ok in SOFTWARE_CHOICES:
+    for sid, _label, ch, prof, _ok in all_choices():
         if ch == channel and prof == profile:
             return sid
     return "custom"
@@ -169,7 +214,7 @@ def software_from_config(cfg: dict) -> str:
 
 def apply_software(cfg: dict, software_id: str) -> dict:
     """软件选择 → 写回 channel / profile（就地改并返回）。"""
-    for sid, _label, ch, prof, _ok in SOFTWARE_CHOICES:
+    for sid, _label, ch, prof, _ok in all_choices():
         if sid == software_id:
             cfg["channel"] = ch
             cfg["profile"] = prof

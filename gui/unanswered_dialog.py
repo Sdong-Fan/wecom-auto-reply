@@ -19,6 +19,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from rag import unanswered
+from gui.theme import COLORS, apply_theme, dialog_geometry, px, scale
 
 # 转人工的原因 → 一句人话
 _WHY = (
@@ -66,17 +67,20 @@ class UnansweredDialog:
 
         self.win = tk.Toplevel(parent)
         self.win.title("最常转人工的问题")
-        self.win.geometry("880x560")
+        self.win.geometry(dialog_geometry(self.win, 760, 560))
         self.win.transient(parent)
+        apply_theme(self.win, scale())
+        self.win.resizable(True, True)
+        self.win.minsize(px(620), px(440))
 
         top = ttk.Frame(self.win)
         top.pack(fill=tk.X, padx=12, pady=(12, 2))
         ttk.Label(
             top,
             text="机器人答不上来的问题都在这儿。补一条资料，能少转很多次人工。",
-            foreground="#1b5e20").pack(side=tk.LEFT)
+            foreground=COLORS["success"]).pack(side=tk.LEFT)
 
-        self._info = ttk.Label(self.win, text="", foreground="#666")
+        self._info = ttk.Label(self.win, text="", foreground=COLORS["ink_mute"])
         self._info.pack(anchor="w", padx=12)
 
         cols = ("no", "count", "question", "why", "last", "state")
@@ -87,7 +91,7 @@ class UnansweredDialog:
                         ("last", "最近一次", 100), ("state", "状态", 60)):
             self.tree.heading(c, text=t)
             self.tree.column(c, width=w, anchor="w")
-        self.tree.tag_configure("done", foreground="#888")
+        self.tree.tag_configure("done", foreground=COLORS["ink_mute"])
         self.tree.bind("<Double-1>", lambda e: self._add_to_kb())
         sb = ttk.Scrollbar(self.win, orient=tk.VERTICAL,
                            command=self.tree.yview)
@@ -99,7 +103,7 @@ class UnansweredDialog:
         bottom = ttk.Frame(self.win)
         bottom.pack(fill=tk.X, side=tk.BOTTOM, padx=12, pady=10)
         self._status = ttk.Label(bottom, text="（双击一行＝加进资料库）",
-                                 foreground="#666")
+                                 foreground=COLORS["ink_mute"])
         self._status.pack(side=tk.LEFT)
         ttk.Button(bottom, text="关闭",
                    command=self.win.destroy).pack(side=tk.RIGHT)
@@ -158,7 +162,7 @@ class UnansweredDialog:
 
     def _added(self, question: str):
         unanswered.mark_done(question)
-        self._status.config(text=f"✓ 已加进资料库：{question[:30]}", foreground="#1b5e20")
+        self._status.config(text=f"✓ 已加进资料库：{question[:30]}", foreground=COLORS["success"])
         self.reload()
 
     def _mark_done(self):

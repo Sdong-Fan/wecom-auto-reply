@@ -1,18 +1,22 @@
 # gui/settings_dialog.py
-"""设置面板：LLM 接口 + 选择软件 + 各模式附加字段 + 连通测试。
+"""设置面板：LLM 接口 + 接入通道（接哪个聊天软件）+ 各模式附加字段 + 连通测试。
 
-设计要点（按用户确认的方案）：
+设计要点：
 * 头部「设置」按钮**常驻**，任何时候都能点开重配，不受运行状态影响。
 * LLM 接口：预设下拉 + 地址 + **模型名** + 密钥 + 「测试连接」。
   模型名必须可编辑 —— 各家模型名不一样，写死 deepseek-chat 换个地址就 400。
-* 选择软件：三项（企业微信截图 / 企业微信 API / 微信 PC 截图）。
-  微信 PC 还没标定 → 置灰并标注，不能选。
+* 接入通道：**表里只有内置推荐项，不是"只支持这三种"**。profiles/ 目录里
+  任何 JSON 都会被自动发现并出现在这里（config.settings_store.discover_profiles）；
+  接新软件不用改代码，跑一次 scripts/calibrate_chat_app.py 生成 profile 即可。
 * 选 API 模式时才显示 corp_id / Secret / open_kfid，并给「测试企业微信连接」。
-* 保存：密钥写 .env，软件选择写 config.json。
+* 保存：密钥写 .env，通道选择写 config.json。
   **LLM 三项可以立即生效**（重载 .env + 重建 client）；
-  **换软件需要重启**（channel/profile 在启动时读一次），所以给一个「立即重启」。
+  **换通道需要重启**（channel/profile 在启动时读一次），所以给一个「立即重启」。
 
-所有网络调用都放后台线程，绝不卡住 Tk 主循环。
+界面约束（2026-10-04 用户反馈后加的）：
+* 内容区**可滚动** + 窗口**可缩放**：原来固定 620x560 且不可缩放，
+  选中「企业微信 API 模式」后凭据栏在窗口外面，用户根本看不到、也拉不出来。
+* 所有尺寸走 theme.px()，字号走 theme.font()（像素字号），跟随 DPI 缩放。
 """
 
 from __future__ import annotations
@@ -27,6 +31,8 @@ from tkinter import messagebox, ttk
 from typing import Callable, Optional
 
 from config import settings_store as store
+from gui.theme import (COLORS, SPACE, apply_theme, dialog_geometry, font, hint,
+                       px, scroll_area)
 from rag.llm_client import PRESETS
 
 logger = logging.getLogger(__name__)
@@ -51,9 +57,13 @@ class SettingsDialog:
 
         self.win = tk.Toplevel(parent)
         self.win.title("设置")
-        self.win.geometry("620x560")
+        self.win.configure(background=COLORS["canvas_soft"])
+        apply_theme(self.win)                     # 与主界面同一套设计系统
+        self.win.geometry(dialog_geometry(self.win, 660, 640))
+        # ★ 必须可缩放：内容比窗口高时用户至少能拉大（配合下面的滚动区）
+        self.win.resizable(True, True)
+        self.win.minsize(px(560), px(360))
         self.win.transient(parent)
-        self.win.resizable(False, False)
 
         self._build()
         try:
@@ -64,101 +74,189 @@ class SettingsDialog:
     # ── 界面 ──────────────────────────────────────────────────────────
 
     def _build(self):
-        pad = {"padx": 12, "pady": 4}
+        # 底部操作条先建（固定不滚动），内容区再填充
+        bottom = tk.Frame(self.win, background=COLORS["canvas"])
+        bottom.pack(fill=tk.X, side=tk.BOTTOM)
+        tk.Frame(bottom, height=1, background=COLORS["hairline"]).pack(fill=tk.X)
+        brow = tk.Frame(bottom, background=COLORS["canvas"])
+        brow.pack(fill=tk.X, padx=SPACE["lg"], pady=SPACE["md"])
+        ttk.Button(brow, text="保存", style="Primary.TButton",
+                   command=self._save).pack(side=tk.RIGHT)
+        ttk.Button(brow, text="取消", style="Ghost.TButton",
+                   command=self.win.destroy).pack(side=tk.RIGHT, padx=(0, SPACE["sm"]))
+        self._restart_btn = ttk.Button(brow, text="立即重启", style="Secondary.TButton",
+                                       command=self._restart, state="disabled")
+        self._restart_btn.pack(side=tk.LEFT)
+        self._saved_status = tk.Label(brow, text="", font=font("small"),
+                                      background=COLORS["canvas"],
+                                      foreground=COLORS["success"], anchor="w")
+        self._saved_status.pack(side=tk.LEFT, padx=SPACE["md"])
 
-        # ══ LLM 接口 ══
-        llm = ttk.LabelFrame(self.win, text="1. LLM 接口（用于生成回复）")
-        llm.pack(fill=tk.X, **pad)
+        # 内容区：可滚动（内容超出窗口时也能看到底部）
+        area, body = scroll_area(self.win)
+        area.pack(fill=tk.BOTH, expand=True)
 
-        row = ttk.Frame(llm)
-        row.pack(fill=tk.X, padx=8, pady=4)
-        ttk.Label(row, text="预设", width=10).pack(side=tk.LEFT)
-        self._preset = ttk.Combobox(row, state="readonly",
-                                    values=[p[0] for p in PRESETS], width=34)
-        self._preset.pack(side=tk.LEFT)
+        self._build_llm(body)
+        self._build_channel(body)
+        self._build_api(body)
+        hint(body, "改完点「保存」。LLM 三项立即生效；换接入通道需要重启"
+                   "（点左下「立即重启」）。").pack(anchor="w",
+                                                   padx=SPACE["lg"], pady=SPACE["md"])
+
+    def _section(self, parent, title: str) -> tk.Frame:
+        """一节：白底卡片 + 标题（比 ttk.LabelFrame 更贴合设计系统）。"""
+        outer = tk.Frame(parent, background=COLORS["hairline"])
+        outer.pack(fill=tk.X, padx=SPACE["lg"], pady=(SPACE["md"], 0))
+        box = tk.Frame(outer, background=COLORS["canvas"])
+        box.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+        tk.Label(box, text=title, font=font("h3", True), background=COLORS["canvas"],
+                 foreground=COLORS["ink"], anchor="w").pack(
+            anchor="w", padx=SPACE["lg"], pady=(SPACE["md"], SPACE["xs"]))
+        inner = tk.Frame(box, background=COLORS["canvas"])
+        inner.pack(fill=tk.X, padx=SPACE["lg"], pady=(0, SPACE["md"]))
+        inner._outer = outer          # 整节显示/隐藏时用（API 凭据栏）
+        return inner
+
+    def _field(self, parent, label: str, key: str, *, show=None,
+               values=None, readonly=False, width_label: int = 11):
+        row = tk.Frame(parent, background=COLORS["canvas"])
+        row.pack(fill=tk.X, pady=px(3))
+        tk.Label(row, text=label, width=width_label, anchor="w", font=font("body"),
+                 background=COLORS["canvas"],
+                 foreground=COLORS["ink_secondary"]).pack(side=tk.LEFT)
+        if values is not None:
+            w = ttk.Combobox(row, values=values, state="readonly" if readonly else "normal",
+                             width=32)
+            w.set(self._cur.get(key, ""))
+        else:
+            w = ttk.Entry(row, show=show)
+            w.insert(0, self._cur.get(key, ""))
+        w.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        return w
+
+    def _build_llm(self, body):
+        box = self._section(body, "1. LLM 接口（生成回复用）")
+        self._preset = ttk.Combobox(box, state="readonly",
+                                    values=[p[0] for p in PRESETS], width=32)
+        prow = tk.Frame(box, background=COLORS["canvas"])
+        prow.pack(fill=tk.X, pady=px(3))
+        tk.Label(prow, text="预设", width=11, anchor="w", font=font("body"),
+                 background=COLORS["canvas"],
+                 foreground=COLORS["ink_secondary"]).pack(side=tk.LEFT)
+        self._preset.pack(in_=prow, side=tk.LEFT, fill=tk.X, expand=True)
         self._preset.bind("<<ComboboxSelected>>", self._on_preset)
+        # 预选：按当前接口地址匹配预设，匹配不上就选“自定义”
+        cur_base = (self._cur.get("llm_base_url") or "").rstrip("/")
+        picked = ""
+        for pname, base, _model in PRESETS:
+            if base and base.rstrip("/") == cur_base:
+                picked = pname
+                break
+        self._preset.set(picked or (PRESETS[0][0] if PRESETS else ""))
 
         self._entries = {}
-        for key, label, show in (
-            ("llm_base_url", "接口地址", None),
-            ("llm_model", "模型名", None),
-            ("llm_api_key", "密钥", "•"),
-        ):
-            r = ttk.Frame(llm)
-            r.pack(fill=tk.X, padx=8, pady=3)
-            ttk.Label(r, text=label, width=10).pack(side=tk.LEFT)
-            e = ttk.Entry(r, width=46, show=show)
-            e.insert(0, self._cur.get(key, ""))
-            e.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            self._entries[key] = e
+        for key, label, show in (("llm_base_url", "接口地址", None),
+                                 ("llm_model", "模型名", None),
+                                 ("llm_api_key", "密钥", "•")):
+            self._entries[key] = self._field(box, label, key, show=show)
 
-        tip = ("提示：地址填到 /v1 为止，不要带 /chat/completions；"
-               "模型名按服务商填（如 deepseek-chat / qwen-plus / moonshot-v1-8k）")
-        ttk.Label(llm, text=tip, foreground="#666").pack(anchor="w", padx=10)
+        hint(box, "地址填到 /v1 为止，不要带 /chat/completions；"
+                  "模型名按服务商填（deepseek-chat / qwen-plus / moonshot-v1-8k…）").pack(
+            anchor="w", pady=(px(4), 0))
+        trow = tk.Frame(box, background=COLORS["canvas"])
+        trow.pack(fill=tk.X, pady=(SPACE["sm"], 0))
+        ttk.Button(trow, text="测试连接", style="Secondary.TButton",
+                   command=self._test_llm).pack(side=tk.LEFT)
+        self._llm_status = tk.Label(trow, text="", font=font("small"),
+                                    background=COLORS["canvas"],
+                                    foreground=COLORS["ink_mute"])
+        self._llm_status.pack(side=tk.LEFT, padx=SPACE["md"])
 
-        trow = ttk.Frame(llm)
-        trow.pack(fill=tk.X, padx=8, pady=6)
-        ttk.Button(trow, text="测试连接", command=self._test_llm).pack(side=tk.LEFT)
-        self._llm_status = ttk.Label(trow, text="", foreground="#666")
-        self._llm_status.pack(side=tk.LEFT, padx=10)
+    def _build_channel(self, body):
+        """接入通道：内置项 + **自动发现的 profile**（接新软件不用改代码）。"""
+        box = self._section(body, "2. 接入通道（接哪个聊天软件）")
+        self._channel_box = tk.Frame(box, background=COLORS["canvas"])
+        self._channel_box.pack(fill=tk.X)
 
-        # ══ 选择软件 ══
-        soft = ttk.LabelFrame(self.win, text="2. 选择要接的聊天软件")
-        soft.pack(fill=tk.X, **pad)
+        bar = tk.Frame(box, background=COLORS["canvas"])
+        bar.pack(fill=tk.X, pady=(SPACE["sm"], 0))
+        ttk.Button(bar, text="怎么接新软件？", style="Ghost.TButton",
+                   command=self._how_to_add).pack(side=tk.LEFT)
+        ttk.Button(bar, text="刷新列表 ↻", style="Ghost.TButton",
+                   command=self._reload_channels).pack(side=tk.LEFT, padx=SPACE["xs"])
+        self._channel_note = hint(bar, "")
+        self._channel_note.pack(side=tk.LEFT, padx=SPACE["md"])
 
+        self._render_channels()
+
+    def _render_channels(self):
+        """按 profiles/ 现状重建单选项（标定完新软件点「刷新列表」就出现）。"""
+        for child in self._channel_box.winfo_children():
+            child.destroy()
         self._software = tk.StringVar(value=self._cur.get("software", "wecom_screenshot"))
-        # 可选性按 profiles/<id>.json 是否存在动态决定：标定完微信 PC 就自动可点
-        for sid, label, ok, note in store.software_options():
-            r = ttk.Frame(soft)
-            r.pack(fill=tk.X, padx=10, pady=2)
+        options = store.software_options()
+        for sid, label, ok, note in options:
+            r = tk.Frame(self._channel_box, background=COLORS["canvas"])
+            r.pack(fill=tk.X, pady=px(2))
             rb = ttk.Radiobutton(r, text=label, value=sid, variable=self._software,
-                                 command=self._on_software, state="normal" if ok else "disabled")
+                                 command=self._on_software,
+                                 state="normal" if ok else "disabled")
             rb.pack(side=tk.LEFT)
             if not ok:
-                ttk.Label(r, text=f"（{note}）", foreground="#999").pack(side=tk.LEFT, padx=6)
-        if not store.profile_available("wechat_pc"):
-            # 已选中一个不可选项时给个兜底，免得面板打开就"选中了不能用的东西"
-            if self._software.get() == "wechat_pc":
-                self._software.set("wecom_screenshot")
-
-        # ══ 企业微信 API 凭据（仅 API 模式显示）══
-        self._api_frame = ttk.LabelFrame(self.win, text="3. 企业微信「微信客服」凭据")
-        self._api_entries = {}
-        for key, label, show in (
-            ("wecom_corp_id", "企业 ID", None),
-            ("wecom_kf_secret", "客服 Secret", "•"),
-            ("wecom_open_kfid", "客服账号 ID", None),
-        ):
-            r = ttk.Frame(self._api_frame)
-            r.pack(fill=tk.X, padx=8, pady=3)
-            ttk.Label(r, text=label, width=12).pack(side=tk.LEFT)
-            e = ttk.Entry(r, width=44, show=show)
-            e.insert(0, self._cur.get(key, ""))
-            e.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            self._api_entries[key] = e
-        ttk.Label(self._api_frame,
-                  text="位置：企业微信后台 → 应用管理 → 微信客服。"
-                       "Secret 用【微信客服】那栏的，不是自建应用的。",
-                  foreground="#666").pack(anchor="w", padx=10)
-        arow = ttk.Frame(self._api_frame)
-        arow.pack(fill=tk.X, padx=8, pady=6)
-        ttk.Button(arow, text="测试企业微信连接", command=self._test_wecom).pack(side=tk.LEFT)
-        self._api_status = ttk.Label(arow, text="", foreground="#666")
-        self._api_status.pack(side=tk.LEFT, padx=10)
-
-        # ══ 底部 ══
-        bottom = ttk.Frame(self.win)
-        bottom.pack(fill=tk.X, side=tk.BOTTOM, padx=12, pady=10)
-        ttk.Button(bottom, text="取消", command=self.win.destroy).pack(side=tk.RIGHT, padx=6)
-        ttk.Button(bottom, text="保存", command=self._save).pack(side=tk.RIGHT)
-
-        self._restart_btn = ttk.Button(bottom, text="立即重启", command=self._restart,
-                                       state="disabled")
-        self._restart_btn.pack(side=tk.LEFT)
-        self._saved_status = ttk.Label(bottom, text="", foreground="#1b5e20")
-        self._saved_status.pack(side=tk.LEFT, padx=10)
-
+                tk.Label(r, text=f"（{note}）", font=font("small"),
+                         background=COLORS["canvas"],
+                         foreground=COLORS["ink_faint"]).pack(side=tk.LEFT, padx=SPACE["sm"])
+        # 选中的是不可用项 → 退回第一个可用项（免得面板打开就是"选中了不能用的"）
+        avail = [sid for sid, _l, ok, _n in options if ok]
+        if self._software.get() not in avail and avail:
+            self._software.set(avail[0])
+        custom = [o for o in options if o[0].startswith("profile:")]
+        self._channel_note.configure(
+            text=(f"已发现 {len(custom)} 个自定义软件" if custom
+                  else "接新软件不用改代码：标定一次就会出现在这里"))
         self._on_software()
+
+    def _reload_channels(self):
+        """重新扫 profiles/ 目录（刚标定完不用重启程序）。"""
+        self._cur["software"] = self._software.get() if hasattr(self, "_software") else ""
+        self._render_channels()
+
+    def _how_to_add(self):
+        messagebox.showinfo(
+            "怎么接别的聊天软件",
+            "本程序用「标定文件」接不同软件，不需要改代码：\n\n"
+            "1) 打开你要接的软件（钉钉 / 飞书 / 微信 / 企业微信…）\n"
+            "2) 在本项目目录执行：\n"
+            "     python scripts/calibrate_chat_app.py\n"
+            "   按提示点两下（选窗口、框聊天区），它会生成\n"
+            "     profiles/<名字>.json\n"
+            "3) 回到这个面板点「刷新列表 ↻」，新软件就会出现并可选\n"
+            "4) 保存 → 点「立即重启」生效\n\n"
+            "原理：采集层（截图 / 红点 / 气泡 / OCR）读的都是 profile 里的坐标与\n"
+            "窗口类名，决策层完全不用动。所以「接更多软件」只是多一个 profile 文件。",
+            parent=self.win)
+
+    def _build_api(self, body):
+        """企业微信「微信客服」凭据（只有选 API 模式时显示）。"""
+        self._api_frame = self._section(body, "3. 企业微信「微信客服」凭据")
+        self._api_outer = self._api_frame._outer
+        self._api_entries = {}
+        for key, label, show in (("wecom_corp_id", "企业 ID", None),
+                                 ("wecom_kf_secret", "客服 Secret", "•"),
+                                 ("wecom_open_kfid", "客服账号 ID", None)):
+            self._api_entries[key] = self._field(self._api_frame, label, key, show=show)
+        hint(self._api_frame,
+             "位置：企业微信后台 → 应用管理 → 微信客服。Secret 用【微信客服】那栏的，"
+             "不是自建应用的。").pack(anchor="w", pady=(px(4), 0))
+        arow = tk.Frame(self._api_frame, background=COLORS["canvas"])
+        arow.pack(fill=tk.X, pady=(SPACE["sm"], 0))
+        ttk.Button(arow, text="测试企业微信连接", style="Secondary.TButton",
+                   command=self._test_wecom).pack(side=tk.LEFT)
+        self._api_status = tk.Label(arow, text="", font=font("small"),
+                                    background=COLORS["canvas"],
+                                    foreground=COLORS["ink_mute"])
+        self._api_status.pack(side=tk.LEFT, padx=SPACE["md"])
+        self._on_software()           # 建完这一节再同步显示状态
 
     # ── 交互 ──────────────────────────────────────────────────────────
 
@@ -180,11 +278,13 @@ class SettingsDialog:
         return self._entries[key].get().strip()
 
     def _on_software(self):
-        is_api = self._software.get() == "wecom_api"
-        if is_api:
-            self._api_frame.pack(fill=tk.X, padx=12, pady=4)
+        """选了 API 模式才显示凭据栏（内容区可滚动，不会看不到）。"""
+        if not hasattr(self, "_api_outer"):
+            return                    # 通道那节先建，此时凭据节还没建
+        if self._software.get() == "wecom_api":
+            self._api_outer.pack(fill=tk.X, padx=SPACE["lg"], pady=(SPACE["md"], 0))
         else:
-            self._api_frame.pack_forget()
+            self._api_outer.pack_forget()
 
     def _values(self) -> dict:
         v = {k: self._get(k) for k in self._entries}
@@ -194,15 +294,15 @@ class SettingsDialog:
 
     # ── 测试连接（后台线程，别卡界面）────────────────────────────────
 
-    def _run_async(self, fn, label: ttk.Label, done_text="测试中…"):
-        label.config(text=done_text, foreground="#666")
+    def _run_async(self, fn, label: tk.Label, done_text="测试中…"):
+        label.config(text=done_text, foreground=COLORS["ink_mute"])
 
         def work():
             try:
                 ok, detail = fn()
             except Exception as e:
                 ok, detail = False, f"{type(e).__name__}: {e}"
-            color = "#1b5e20" if ok else "#b3261e"
+            color = COLORS["success"] if ok else COLORS["danger"]
 
             def apply():
                 try:
@@ -230,7 +330,7 @@ class SettingsDialog:
         vals = self._values()
         if not (vals["wecom_corp_id"] and vals["wecom_kf_secret"]):
             self._api_status.config(text="✗ 先填企业 ID 和客服 Secret",
-                                    foreground="#b3261e")
+                                    foreground=COLORS["danger"])
             return
 
         def run():
@@ -270,13 +370,14 @@ class SettingsDialog:
 
         if result["software_changed"]:
             self._saved_status.config(
-                text=f"已保存。换软件（→ {result['after']}）需要重启才生效，"
+                text=f"已保存。换通道（→ {result['after']}）需要重启才生效，"
                      f"点「立即重启」或关掉窗口重新双击启动.bat。",
-                foreground="#8a6d00")
+                foreground=COLORS["warning"])
             self._restart_btn.config(state="normal")
-            logger.info(f"设置已保存：软件 {result['before']} → {result['after']}")
+            logger.info(f"设置已保存：通道 {result['before']} → {result['after']}")
         else:
-            self._saved_status.config(text=f"已保存。{applied}", foreground="#1b5e20")
+            self._saved_status.config(text=f"已保存。{applied}",
+                                      foreground=COLORS["success"])
         if self.on_saved:
             try:
                 self.on_saved()

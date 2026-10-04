@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import tkinter as tk
 from tkinter import ttk
+from gui.theme import COLORS, apply_theme, dialog_geometry, px, scale
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +33,11 @@ class LearnReview:
 
         self.win = tk.Toplevel(parent)
         self.win.title("这次改动，要学哪些？")
-        self.win.geometry("660x580")
+        self.win.geometry(dialog_geometry(self.win, 820, 600))
         self.win.transient(parent)
+        apply_theme(self.win, scale())
+        self.win.resizable(True, True)
+        self.win.minsize(px(640), px(460))
         self.win.protocol("WM_DELETE_WINDOW", self._cancel)
 
         self._build()
@@ -54,7 +58,7 @@ class LearnReview:
                              ("你发出去", p.get("human") or "")):
             row = ttk.Frame(head)
             row.pack(fill=tk.X, padx=8, pady=1)
-            ttk.Label(row, text=f"{label}：", width=8, foreground="#666").pack(side=tk.LEFT,
+            ttk.Label(row, text=f"{label}：", width=8, foreground=COLORS["ink_mute"]).pack(side=tk.LEFT,
                                                                              anchor="n")
             ttk.Label(row, text=value[:200], wraplength=520,
                       justify="left").pack(side=tk.LEFT, anchor="w")
@@ -80,12 +84,12 @@ class LearnReview:
 
         if n == 0:
             ttk.Label(body, text="这次没有可学的东西（可能就是一次纯粹的措辞润色）。",
-                      foreground="#666").pack(anchor="w", pady=10)
+                      foreground=COLORS["ink_mute"]).pack(anchor="w", pady=10)
 
         ttk.Label(self.win,
                   text="勾中的才会学；点「取消」＝这次什么都不学。"
                        "资料库里的改动之后可以在「资料库」页撤销。",
-                  foreground="#8a6d00", wraplength=620,
+                  foreground=COLORS["warning"], wraplength=620,
                   justify="left").pack(anchor="w", padx=12)
 
         bottom = ttk.Frame(self.win)
@@ -101,7 +105,7 @@ class LearnReview:
         box = ttk.LabelFrame(parent, text=title)
         box.pack(fill=tk.X, pady=(0, 8))
         if note:
-            ttk.Label(box, text=note, foreground="#b3261e").pack(anchor="w", padx=8)
+            ttk.Label(box, text=note, foreground=COLORS["danger"]).pack(anchor="w", padx=8)
         for key, text, extra in items:
             var = tk.BooleanVar(value=True)      # 默认全勾，不想学的自己去掉
             self._vars[key] = var
@@ -111,7 +115,7 @@ class LearnReview:
             ttk.Label(row, text=text, wraplength=520,
                       justify="left").pack(side=tk.LEFT, anchor="w")
             if extra:
-                ttk.Label(row, text=extra, foreground="#666",
+                ttk.Label(row, text=extra, foreground=COLORS["ink_mute"],
                           wraplength=520).pack(side=tk.LEFT, anchor="w")
         return len(items)
 

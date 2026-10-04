@@ -25,6 +25,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from rag import prompt_store as ps
+from gui.theme import COLORS, apply_theme, dialog_geometry, font, px, scale
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +57,11 @@ class KbDialog:
 
         self.win = tk.Toplevel(parent)
         self.win.title("知识库")
-        self.win.geometry("900x680")
+        self.win.geometry(dialog_geometry(self.win, 980, 720))
         self.win.transient(parent)
+        apply_theme(self.win, scale())
+        self.win.resizable(True, True)
+        self.win.minsize(px(760), px(520))
         self._build()
         try:
             self.win.grab_set()
@@ -78,7 +82,7 @@ class KbDialog:
         # 底部先建：提示词页初始化时要用到 self._status
         bottom = ttk.Frame(self.win)
         bottom.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=10)
-        self._status = ttk.Label(bottom, text="", foreground="#1b5e20")
+        self._status = ttk.Label(bottom, text="", foreground=COLORS["success"])
         self._status.pack(side=tk.LEFT)
         ttk.Button(bottom, text="关闭", command=self.win.destroy).pack(side=tk.RIGHT, padx=6)
         ttk.Button(bottom, text="保存", command=self._save).pack(side=tk.RIGHT)
@@ -132,12 +136,12 @@ class KbDialog:
         ttk.Button(top, text="刷新", command=self._learn_load).pack(side=tk.LEFT, padx=8)
         ttk.Button(top, text="预览实际注入给 AI 的内容",
                    command=self._learn_preview).pack(side=tk.LEFT)
-        self._learn_info = ttk.Label(top, text="", foreground="#666")
+        self._learn_info = ttk.Label(top, text="", foreground=COLORS["ink_mute"])
         self._learn_info.pack(side=tk.LEFT, padx=10)
 
         tip = ("只自动学「怎么说话」；人工回复里带出的**新说法**（价格/时效/政策）"
                "一律要你确认才进资料库 —— 不然一次性的「这次给你免押」会变成通用政策。")
-        ttk.Label(page, text=tip, foreground="#8a6d00").pack(anchor="w", padx=12)
+        ttk.Label(page, text=tip, foreground=COLORS["warning"]).pack(anchor="w", padx=12)
 
         # 待确认的新知识（最重要，放最上面）
         f_facts = ttk.LabelFrame(
@@ -227,7 +231,7 @@ class KbDialog:
             return
         self._learn_info.config(
             text=("已开启自动学习" if want else "已关闭自动学习（已学到的还会继续用）"),
-            foreground="#1b5e20" if want else "#8a6d00")
+            foreground=COLORS["success"] if want else COLORS["warning"])
 
     def _learn_preview(self):
         """把真正注入给 AI 的那段显示出来 —— 学偏了要能一眼看出来。"""
@@ -237,7 +241,7 @@ class KbDialog:
         w.title("实际注入给 AI 的内容")
         w.geometry("760x520")
         w.transient(self.win)
-        t = tk.Text(w, wrap="word", font=("微软雅黑", 10))
+        t = tk.Text(w, wrap="word", font=font("small"))
         t.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         t.insert("1.0", block or "（现在什么都没注入 —— 要么还没学到，要么学习关着）")
         t.configure(state="disabled")
@@ -284,7 +288,7 @@ class KbDialog:
                 f"（数字和型号要自己核对清楚 —— 写错就是报错价）\n\n"
                 f"采纳之后，下次同样的问题检索分就高了，不用再转人工。确认？"):
             return
-        self._learn_info.config(text="正在写进资料库…", foreground="#8a6d00")
+        self._learn_info.config(text="正在写进资料库…", foreground=COLORS["warning"])
         self.win.update_idletasks()
         import threading
 
@@ -305,13 +309,13 @@ class KbDialog:
 
     def _fact_failed(self, why: str):
         messagebox.showerror("入库失败", why)
-        self._learn_info.config(text=f"✗ 入库失败：{why}", foreground="#b3261e")
+        self._learn_info.config(text=f"✗ 入库失败：{why}", foreground=COLORS["danger"])
 
     def _fact_done(self):
         self._learn_load()
         self._kb_load(0)
         self._learn_info.config(text="已写进资料库，立即生效（可在资料库页改/撤）",
-                                foreground="#1b5e20")
+                                foreground=COLORS["success"])
 
     def _fact_reject(self):
         from rag import learn_store as ls
@@ -346,7 +350,7 @@ class KbDialog:
         ttk.Button(row, text="重命名", command=self._archive_rename).pack(side=tk.LEFT, padx=2)
         ttk.Button(row, text="复制档案", command=self._archive_copy).pack(side=tk.LEFT, padx=2)
         ttk.Button(row, text="删除", command=self._archive_delete).pack(side=tk.LEFT, padx=2)
-        self._arch_info = ttk.Label(row, text="", foreground="#666")
+        self._arch_info = ttk.Label(row, text="", foreground=COLORS["ink_mute"])
         self._arch_info.pack(side=tk.LEFT, padx=10)
         self._arch_tip()
 
@@ -367,7 +371,7 @@ class KbDialog:
             return
         self._arch_tip()
         self._status.config(text=f"已切换到「{a['name']}」—— 机器人下一条回复就按这个库",
-                            foreground="#1b5e20")
+                            foreground=COLORS["success"])
         self._refresh_all()
 
     def _refresh_all(self):
@@ -416,7 +420,7 @@ class KbDialog:
         self._reload_archives()
         self._status.config(
             text=f"已新建「{entry['name']}」：空的资料库，提示词从「{archives.get(src)['name']}」拷了一份",
-            foreground="#1b5e20")
+            foreground=COLORS["success"])
         if messagebox.askyesno("切过去？", f"现在切到「{entry['name']}」开始加资料？"):
             self._arch_combo.current(len(self._archives) - 1)
             self._on_archive_change()
@@ -431,7 +435,7 @@ class KbDialog:
             return
         archives.rename(a["id"], name)
         self._reload_archives()
-        self._status.config(text=f"已改名为「{name}」", foreground="#1b5e20")
+        self._status.config(text=f"已改名为「{name}」", foreground=COLORS["success"])
 
     def _archive_copy(self):
         """整份复制（条目 + 源文件 + 提示词 + 学到的语气）—— 拿来做变体最省事。"""
@@ -445,7 +449,7 @@ class KbDialog:
         if self.qdrant is None:
             messagebox.showerror("复制不了", "拿不到资料库连接")
             return
-        self._status.config(text="正在复制…（条目多的话要几秒）", foreground="#8a6d00")
+        self._status.config(text="正在复制…（条目多的话要几秒）", foreground=COLORS["warning"])
         self.win.update_idletasks()
         try:
             entry = archives.create(name, note=f"从「{src['name']}」复制")
@@ -458,7 +462,7 @@ class KbDialog:
             messagebox.showerror("复制失败", str(e))
             return
         self._reload_archives()
-        self._status.config(text=f"已复制成「{entry['name']}」：{n} 条资料", foreground="#1b5e20")
+        self._status.config(text=f"已复制成「{entry['name']}」：{n} 条资料", foreground=COLORS["success"])
 
     def _archive_delete(self):
         from rag import archives
@@ -486,7 +490,7 @@ class KbDialog:
             return
         self._reload_archives()
         self._status.config(text=f"已删除「{a['name']}」（源文件在回收目录里）",
-                            foreground="#1b5e20")
+                            foreground=COLORS["success"])
 
     # ── 资料库页 ──────────────────────────────────────────────────────
 
@@ -498,7 +502,7 @@ class KbDialog:
         r1.pack(fill=tk.X, padx=8, pady=6)
         ttk.Button(r1, text="选择文件…", command=self._kb_pick_files).pack(side=tk.LEFT)
         ttk.Button(r1, text="重建索引", command=self._kb_rebuild).pack(side=tk.LEFT, padx=6)
-        self._kb_up_status = ttk.Label(r1, text="", foreground="#666")
+        self._kb_up_status = ttk.Label(r1, text="", foreground=COLORS["ink_mute"])
         self._kb_up_status.pack(side=tk.LEFT, padx=10)
 
         top = ttk.Frame(page)
@@ -514,7 +518,7 @@ class KbDialog:
                    command=lambda: self._kb_load(self._kb_page - 1)).pack(side=tk.LEFT, padx=(12, 2))
         ttk.Button(top, text="下一页 →",
                    command=lambda: self._kb_load(self._kb_page + 1)).pack(side=tk.LEFT, padx=2)
-        self._kb_info = ttk.Label(top, text="", foreground="#666")
+        self._kb_info = ttk.Label(top, text="", foreground=COLORS["ink_mute"])
         self._kb_info.pack(side=tk.LEFT, padx=10)
 
         # 单条操作：手动改资料全靠这一排
@@ -528,7 +532,7 @@ class KbDialog:
         # ★ 最常转人工的问题 = 资料库缺什么。放这里顺手就能补。
         ttk.Button(ops, text="最常转人工的问题…",
                    command=self._open_unanswered).pack(side=tk.LEFT, padx=(18, 6))
-        ttk.Label(ops, text="（双击一行＝看全文）", foreground="#666").pack(side=tk.LEFT, padx=8)
+        ttk.Label(ops, text="（双击一行＝看全文）", foreground=COLORS["ink_mute"]).pack(side=tk.LEFT, padx=8)
 
         # 问题和答案**必须分两列**：挤在一列里 Treeview 只显示第一行，
         # 用户看到满屏"客户问题"，会以为答案根本没导进来。
@@ -569,13 +573,13 @@ class KbDialog:
         w.title("资料全文")
         w.geometry("760x520")
         w.transient(self.win)
-        t = tk.Text(w, wrap="word", font=("微软雅黑", 10))
+        t = tk.Text(w, wrap="word", font=font("small"))
         t.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         t.insert("1.0", e["text"] if not e["faq"]
                  else f"客户问题：\n{e['question']}\n\n销售回答：\n{e['answer']}")
         t.configure(state="disabled")
         ttk.Label(w, text=f"来源：{e['source'] or '(无)'}    id：{e['id']}",
-                  foreground="#666").pack(anchor="w", padx=10, pady=(0, 8))
+                  foreground=COLORS["ink_mute"]).pack(anchor="w", padx=10, pady=(0, 8))
 
     def _kb_edit(self):
         e = self._kb_selected()
@@ -606,13 +610,13 @@ class KbDialog:
         self._kb_load(self._kb_page)
         self._kb_up_status.config(
             text=f"已新增 1 条（{res.get('chunks', 0)} 块入库），立即生效",
-            foreground="#1b5e20")
+            foreground=COLORS["success"])
 
     def _after_edit(self, res):
         self._kb_load(self._kb_page)
         self._kb_up_status.config(
             text=f"已改 1 条（{res.get('chunks', 0)} 块重新入库），立即生效",
-            foreground="#1b5e20")
+            foreground=COLORS["success"])
 
     def _kb_undo(self):
         from rag import kb_history
@@ -627,17 +631,17 @@ class KbDialog:
         if not messagebox.askyesno("撤销上次修改",
                                    f"把这条退回上一版？\n\n现在：{e['text'][:120]}…"):
             return
-        self._kb_up_status.config(text="正在退回…", foreground="#8a6d00")
+        self._kb_up_status.config(text="正在退回…", foreground=COLORS["warning"])
         self.win.update_idletasks()
         try:
             res = kb_history.undo(self.qdrant, e["id"], self.collection)
         except Exception as ex:
             messagebox.showerror("撤销失败", str(ex))
-            self._kb_up_status.config(text=f"✗ 撤销失败：{ex}", foreground="#b3261e")
+            self._kb_up_status.config(text=f"✗ 撤销失败：{ex}", foreground=COLORS["danger"])
             return
         self._kb_load(self._kb_page)
         self._kb_up_status.config(
-            text=f"已退回 {res.get('restored_at', '')} 那一版", foreground="#1b5e20")
+            text=f"已退回 {res.get('restored_at', '')} 那一版", foreground=COLORS["success"])
 
     def _kb_delete(self):
         from rag import kb_history
@@ -655,7 +659,7 @@ class KbDialog:
             return
         kb_history.record(e["id"], e["text"], e["source"], reason="删除")
         self._kb_load(self._kb_page)
-        self._kb_up_status.config(text="已删除 1 条（历史里留了一份）", foreground="#1b5e20")
+        self._kb_up_status.config(text="已删除 1 条（历史里留了一份）", foreground=COLORS["success"])
 
     # ── 上传 / 重建索引 ───────────────────────────────────────────────
 
@@ -672,22 +676,22 @@ class KbDialog:
     def _kb_import(self, paths):
         """导入跑在**后台线程**：嵌入要加载模型、几十块可能十几秒，不能卡界面。"""
         if self.qdrant is None:
-            self._kb_up_status.config(text="拿不到资料库连接", foreground="#b3261e")
+            self._kb_up_status.config(text="拿不到资料库连接", foreground=COLORS["danger"])
             return
         import threading
         from pipeline.upload import import_files
         self._kb_up_status.config(text=f"正在导入 {len(paths)} 个文件…",
-                                  foreground="#8a6d00")
+                                  foreground=COLORS["warning"])
 
         def work():
             def prog(msg):
                 self.win.after(0, lambda m=msg: self._kb_up_status.config(
-                    text=m, foreground="#8a6d00"))
+                    text=m, foreground=COLORS["warning"]))
             try:
                 res = import_files(paths, self.qdrant, self.collection, progress=prog)
             except Exception as e:
                 self.win.after(0, lambda: self._kb_up_status.config(
-                    text=f"导入出错: {e}", foreground="#b3261e"))
+                    text=f"导入出错: {e}", foreground=COLORS["danger"]))
                 return
 
             def done():
@@ -701,7 +705,7 @@ class KbDialog:
                 parts.append(f"源目录现有 {len(list_uploaded())} 个文件")
                 self._kb_up_status.config(
                     text="导入完成：" + "，".join(parts),
-                    foreground="#1b5e20" if not res["failed"] else "#8a6d00")
+                    foreground=COLORS["success"] if not res["failed"] else COLORS["warning"])
                 if res["failed"]:
                     messagebox.showwarning(
                         "部分文件失败",
@@ -720,7 +724,7 @@ class KbDialog:
         from pipeline.upload import import_files, source_files
         files = source_files()
         if not files:
-            self._kb_up_status.config(text="data/chat_raw 下没有源文件", foreground="#b3261e")
+            self._kb_up_status.config(text="data/chat_raw 下没有源文件", foreground=COLORS["danger"])
             return
         if not messagebox.askyesno(
                 "重建索引",
@@ -729,7 +733,7 @@ class KbDialog:
             return
         import threading
         self._kb_up_status.config(text=f"重建中…（{len(files)} 个源文件）",
-                                  foreground="#8a6d00")
+                                  foreground=COLORS["warning"])
 
         def work():
             try:
@@ -738,7 +742,7 @@ class KbDialog:
                 ensure_collection(self.qdrant, self.collection)
             except Exception as e:
                 self.win.after(0, lambda: self._kb_up_status.config(
-                    text=f"清空索引失败: {e}", foreground="#b3261e"))
+                    text=f"清空索引失败: {e}", foreground=COLORS["danger"]))
                 return
             res = import_files([str(f) for f in files], self.qdrant, self.collection,
                                progress=lambda m: self.win.after(
@@ -746,7 +750,7 @@ class KbDialog:
             self.win.after(0, lambda: (
                 self._kb_up_status.config(
                     text=f"重建完成：{len(res['ok'])} 个源、{res['chunks']} 块",
-                    foreground="#1b5e20"),
+                    foreground=COLORS["success"]),
                 self._kb_load(0)))
 
         threading.Thread(target=work, daemon=True).start()
@@ -790,12 +794,12 @@ class KbDialog:
         self._probe_q.pack(side=tk.LEFT, padx=4)
         self._probe_q.bind("<Return>", lambda e: self._probe_run())
         ttk.Button(top, text="试问", command=self._probe_run).pack(side=tk.LEFT)
-        self._probe_info = ttk.Label(top, text="", foreground="#666")
+        self._probe_info = ttk.Label(top, text="", foreground=COLORS["ink_mute"])
         self._probe_info.pack(side=tk.LEFT, padx=10)
 
         ttk.Label(page, text="下面就是线上会检索到的内容和分数。分数高于门槛才会直接回客户，"
                             "否则转人工。答案也要看 —— 检索对了但资料本身答错，照样发错。",
-                  foreground="#8a6d00").pack(anchor="w", padx=12)
+                  foreground=COLORS["warning"]).pack(anchor="w", padx=12)
 
         cols = ("rank", "score", "verdict", "question", "answer")
         self._probe_tree = ttk.Treeview(page, columns=cols, show="headings", height=16)
@@ -804,8 +808,8 @@ class KbDialog:
                         ("answer", "对应的销售回答", 330)):
             self._probe_tree.heading(c, text=t)
             self._probe_tree.column(c, width=w, anchor="w")
-        self._probe_tree.tag_configure("ok", foreground="#1b5e20")
-        self._probe_tree.tag_configure("low", foreground="#b3261e")
+        self._probe_tree.tag_configure("ok", foreground=COLORS["success"])
+        self._probe_tree.tag_configure("low", foreground=COLORS["danger"])
         self._probe_tree.tag_configure("plain", foreground="#555")
         sb = ttk.Scrollbar(page, orient=tk.VERTICAL, command=self._probe_tree.yview)
         self._probe_tree.configure(yscrollcommand=sb.set)
@@ -855,17 +859,17 @@ class KbDialog:
         self._combo.current(0)
         self._combo.pack(side=tk.LEFT, padx=6)
         self._combo.bind("<<ComboboxSelected>>", self._on_switch)
-        self._hint = ttk.Label(top, text="", foreground="#666")
+        self._hint = ttk.Label(top, text="", foreground=COLORS["ink_mute"])
         self._hint.pack(side=tk.LEFT, padx=10)
 
         tip = ("提示：`{context}` 和 `{conversation_history}` 是程序填内容的占位符，"
                "删掉会导致生成回复报错（保存时会拦住）。")
-        ttk.Label(page, text=tip, foreground="#8a6d00").pack(anchor="w", padx=12)
+        ttk.Label(page, text=tip, foreground=COLORS["warning"]).pack(anchor="w", padx=12)
 
         # 编辑区
         box = ttk.Frame(page)
         box.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
-        self._text = tk.Text(box, wrap="word", font=("微软雅黑", 10), undo=True)
+        self._text = tk.Text(box, wrap="word", font=font("small"), undo=True)
         sb = ttk.Scrollbar(box, orient=tk.VERTICAL, command=self._text.yview)
         self._text.configure(yscrollcommand=sb.set)
         self._text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -874,7 +878,7 @@ class KbDialog:
         # 受保护区（只读）
         safe = ttk.LabelFrame(page, text="受保护区（只读 —— 这些规则改了会答错，不参与编辑）")
         safe.pack(fill=tk.X, padx=10, pady=(0, 10))
-        t = tk.Text(safe, height=7, wrap="word", foreground="#666",
+        t = tk.Text(safe, height=7, wrap="word", foreground=COLORS["ink_mute"],
                     background="#f5f5f5", relief="flat")
         t.insert("1.0", ps.SAFETY_RULES)
         t.configure(state="disabled")
@@ -903,10 +907,10 @@ class KbDialog:
         ok, why = ps.set_prompt(key, text)
         if not ok:
             messagebox.showerror("保存失败", why)
-            self._status.config(text="✗ " + why[:60], foreground="#b3261e")
+            self._status.config(text="✗ " + why[:60], foreground=COLORS["danger"])
             return False
         self._status.config(text=f"✓ 已保存（{dict(TABS)[key]}），立即生效",
-                            foreground="#1b5e20")
+                            foreground=COLORS["success"])
         self._load(key)
         if self.on_saved:
             try:
@@ -918,7 +922,7 @@ class KbDialog:
     def _reset(self):
         key = self._which.get()
         if not ps.is_customized(key):
-            self._status.config(text="这一项已经是出厂默认了", foreground="#666")
+            self._status.config(text="这一项已经是出厂默认了", foreground=COLORS["ink_mute"])
             return
         if not messagebox.askyesno("恢复默认",
                                    f"把「{dict(TABS)[key]}」恢复成出厂默认？"
@@ -926,4 +930,4 @@ class KbDialog:
             return
         ps.reset(key)
         self._load(key)
-        self._status.config(text="✓ 已恢复出厂默认", foreground="#1b5e20")
+        self._status.config(text="✓ 已恢复出厂默认", foreground=COLORS["success"])

@@ -43,8 +43,12 @@ def test_unavailable_software_is_disabled_not_hidden():
 
 def test_api_credentials_only_shown_in_api_mode():
     assert "def _on_software" in SRC
-    assert "self._api_frame.pack_forget()" in SRC
-    assert "self._api_frame.pack(" in SRC
+    # 2026-10-04：改成整节显示/隐藏（凭据那节挂在 _api_outer 上），
+    # 而且内容区可滚动 —— 原来固定高度不可缩放，API 字段在窗口外面看不到
+    assert "self._api_outer.pack_forget()" in SRC
+    assert "self._api_outer.pack(" in SRC
+    assert "scroll_area(" in SRC, "内容区必须可滚动，否则底部字段看不到"
+    assert "resizable(True, True)" in SRC, "窗口必须可缩放"
 
 
 def test_has_wecom_connection_test():
@@ -135,7 +139,7 @@ def test_dialog_actually_builds(tmp_path):
         assert dlg._get("llm_api_key") == "sk-test"
         # 非 API 模式下凭据区应当收起
         # （用 winfo_manager 判断：测试里窗口是 withdraw 的，ismapped 恒为 0）
-        assert dlg._api_frame.winfo_manager() == ""
+        assert dlg._api_outer.winfo_manager() == ""   # 非 API 模式：整节隐藏
         # 切到 API 模式后应当显示
         dlg._software.set("wecom_api")
         dlg._on_software()

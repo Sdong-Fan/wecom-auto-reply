@@ -13,6 +13,7 @@ import logging
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
+from gui.theme import COLORS, apply_theme, dialog_geometry, font, px, scale
 
 logger = logging.getLogger(__name__)
 
@@ -49,21 +50,24 @@ class EntryEditor:
 
         self.win = tk.Toplevel(parent)
         self.win.title("新增资料" if self.adding else "编辑资料")
-        self.win.geometry("720x520")
+        self.win.geometry(dialog_geometry(self.win, 760, 560))
         self.win.transient(parent)
+        apply_theme(self.win, scale())
+        self.win.resizable(True, True)
+        self.win.minsize(px(620), px(460))
 
         head = ttk.Frame(self.win)
         head.pack(fill=tk.X, padx=12, pady=(12, 4))
         if self.adding:
-            hint, color = "填一句话问题和一句话答案 —— 客户这么问，机器人就这么答", "#1b5e20"
+            hint, color = "填一句话问题和一句话答案 —— 客户这么问，机器人就这么答", COLORS["success"]
         elif self.faq:
-            hint, color = "这条是问答格式 —— 问题和答案分开改", "#1b5e20"
+            hint, color = "这条是问答格式 —— 问题和答案分开改", COLORS["success"]
         else:
-            hint, color = "这条是整段资料 —— 直接改内容", "#8a6d00"
+            hint, color = "这条是整段资料 —— 直接改内容", COLORS["warning"]
         ttk.Label(head, text=hint, foreground=color).pack(side=tk.LEFT)
         if not self.adding:
             ttk.Label(head, text=f"来源：{self.entry.get('source') or '(无)'}",
-                      foreground="#666").pack(side=tk.RIGHT)
+                      foreground=COLORS["ink_mute"]).pack(side=tk.RIGHT)
 
         self._q = None
         self._a = None
@@ -72,26 +76,26 @@ class EntryEditor:
 
         if self.faq:
             ttk.Label(body, text="客户问题").pack(anchor="w")
-            self._q = tk.Text(body, height=3, wrap="word", font=("微软雅黑", 10))
+            self._q = tk.Text(body, height=3, wrap="word", font=font("small"))
             self._q.pack(fill=tk.X, pady=(0, 8))
             self._q.insert("1.0", initial.get("question", ""))
 
             ttk.Label(body, text="销售回答").pack(anchor="w")
-            self._a = tk.Text(body, height=10, wrap="word", font=("微软雅黑", 10))
+            self._a = tk.Text(body, height=10, wrap="word", font=font("small"))
             self._a.pack(fill=tk.BOTH, expand=True)
             self._a.insert("1.0", initial.get("answer", ""))
         else:
             ttk.Label(body, text="资料内容").pack(anchor="w")
-            self._a = tk.Text(body, height=16, wrap="word", font=("微软雅黑", 10))
+            self._a = tk.Text(body, height=16, wrap="word", font=font("small"))
             self._a.pack(fill=tk.BOTH, expand=True)
             self._a.insert("1.0", initial.get("text", ""))
 
         tip = ("提示：回答里的数字（价格、押金、天数）必须来自你自己的资料 —— "
                "编一个数字出去就是赔钱。改完建议去「试问一句」验证一下。")
-        ttk.Label(self.win, text=tip, foreground="#8a6d00",
+        ttk.Label(self.win, text=tip, foreground=COLORS["warning"],
                   wraplength=680, justify="left").pack(anchor="w", padx=12)
 
-        self._status = ttk.Label(self.win, text="", foreground="#666")
+        self._status = ttk.Label(self.win, text="", foreground=COLORS["ink_mute"])
         self._status.pack(anchor="w", padx=12, pady=(4, 0))
 
         bottom = ttk.Frame(self.win)
@@ -127,7 +131,7 @@ class EntryEditor:
                 return
         else:
             if text == (self.entry.get("text") or "").strip():
-                self._status.config(text="内容没变，不用保存", foreground="#666")
+                self._status.config(text="内容没变，不用保存", foreground=COLORS["ink_mute"])
                 return
             if not messagebox.askyesno(
                     "确认修改",
@@ -137,7 +141,7 @@ class EntryEditor:
 
         self._save_btn.config(state="disabled")
         self._status.config(text="正在重新生成索引…（第一次要加载模型，约 5~10 秒）",
-                            foreground="#8a6d00")
+                            foreground=COLORS["warning"])
 
         old_text = self.entry.get("text") or ""
         old_id = self.entry.get("id")
@@ -171,14 +175,14 @@ class EntryEditor:
 
     def _fail(self, why: str):
         self._save_btn.config(state="normal")
-        self._status.config(text=f"✗ 保存失败：{why}", foreground="#b3261e")
+        self._status.config(text=f"✗ 保存失败：{why}", foreground=COLORS["danger"])
         messagebox.showerror("保存失败", why)
 
     def _done(self, res):
         self.result = res
         self._status.config(
             text=("✓ 已新增，立即生效" if self.adding else "✓ 已保存，立即生效"),
-            foreground="#1b5e20")
+            foreground=COLORS["success"])
         if self.on_saved:
             try:
                 self.on_saved(res)

@@ -1,4 +1,4 @@
-﻿# gui/dashboard.py
+# gui/dashboard.py
 """运营看板（独立窗口）—— docs/看板-PRD.md 的实现。
 
 给谁看：**店主本人**。所以它不是 BI，而是"日报 + 待办清单"：
@@ -68,8 +68,8 @@ class DashboardWindow:
         self.win = tk.Toplevel(parent)
         self.win.title("运营看板")
         self.win.configure(background=COLORS["canvas_soft"])
-        self.win.geometry("1120x820")
-        self.win.minsize(960, 680)
+        self.win.geometry("1220x860")
+        self.win.minsize(1040, 680)
         self.win.protocol("WM_DELETE_WINDOW", self._close)
         apply_theme(self.win)
 

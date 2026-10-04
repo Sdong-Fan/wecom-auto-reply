@@ -93,3 +93,7 @@ Desktop.ini
 WeComBot-v*.zip
 *.zip
 
+
+# 看板示例数据（由 scripts/make_demo_stats.py 生成，可重跑，不入库）
+data/demo_stats/
+

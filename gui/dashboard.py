@@ -15,6 +15,7 @@ import calendar
 import csv
 import tkinter as tk
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from stats import aggregate as agg
@@ -29,6 +30,11 @@ GUARD_PATHS = ("越权承诺", "拖延话术", "议价加码", "议价特批", "
 NEUTRAL_PATHS = ("正常直答", "闲聊", "无信息量/收尾", "人工发出", "欢迎语", "本地直答",
                  "其他")
 
+# 示例数据：由 scripts/make_demo_stats.py 把三批离线评测（各 200 条）回放生成。
+# 存在的意义：新用户第一次打开看板是空的，看不出价值；勾一下就能看到"长什么样"。
+# 它**不是**真实接待记录，界面上必须明确标出来（免得店主认成自己的数据）。
+DEMO_ROOT = Path(__file__).resolve().parent.parent / "data" / "demo_stats"
+
 
 def _fmt_seconds(v: float | None) -> str:
     if v is None:
@@ -41,14 +47,29 @@ def _fmt_seconds(v: float | None) -> str:
 
 
 def _short_reason(reason: str) -> str:
-    """把"置信度不足(0.48)"截成"置信度不足" —— 表格里括号里的分数挤没了正文。"""
+    """把转人工原因翻成店主看得懂的话并截短。
+
+    日志里存的是内部说法（"置信度不足(0.48)" / "llm_requests_human" /
+    "越权承诺（时效承诺）"），表格里放不下也没必要看括号里的分数。
+    """
     r = (reason or "").strip()
     if not r:
         return "—"
     for sep in ("(", "（"):
         if sep in r:
             r = r.split(sep)[0]
-    return r.strip() or "—"
+    r = r.strip()
+    alias = {
+        "llm_requests_human": "模型不确定",
+        "all_checks_passed": "分数不够",
+        "retrieval_low_confidence": "检索分数低",
+        "low_retrieval_confidence": "检索分数低",
+        "must_escalate": "规则要求转人工",
+        "deferral_phrase": "回复是拖延话术",
+        "unsafe_promise": "越权承诺",
+        "hold": "转人工",
+    }
+    return alias.get(r, r) or "—"
 
 
 class DashboardWindow:
@@ -63,6 +84,7 @@ class DashboardWindow:
         self._range = "today"          # today | week | custom
         self._start = date.today()
         self._end = date.today()
+        self._demo_on = False          # 是否在看示例数据（见 _enter_demo）
         self._stats: agg.Stats | None = None
 
         self.win = tk.Toplevel(parent)
@@ -116,29 +138,67 @@ class DashboardWindow:
         inner = tk.Frame(bar, background=COLORS["canvas"])
         inner.pack(fill="x", padx=SPACE["lg"], pady=SPACE["md"])
 
+        # ★ 先 pack 右侧那组（导出/刷新/时间范围）：Tk 的 pack 是**先 pack 的先占空间**，
+        #   右侧最后 pack 的话一超宽就被裁掉（上一版「导出 CSV」和日期都是这么没的）
+        ttk.Button(inner, text="导出", style="Secondary.TButton",
+                   command=self._export).pack(side="right")
+        ttk.Button(inner, text="刷新 ↻", style="Ghost.TButton",
+                   command=self.refresh).pack(side="right", padx=(0, SPACE["sm"]))
+        self._range_label = tk.Label(inner, text="", font=font("small"),
+                                     background=COLORS["canvas"],
+                                     foreground=COLORS["ink_mute"])
+        self._range_label.pack(side="right", padx=(0, SPACE["md"]))
+
         tk.Label(inner, text="运营看板", font=font("h1", True),
                  background=COLORS["canvas"], foreground=COLORS["ink"]).pack(side="left")
 
         # 分段控件（今日 / 近 7 天 / 自定义）—— 选中态是靛蓝浅底
         self._seg = {}
         seg = tk.Frame(inner, background=COLORS["canvas"])
-        seg.pack(side="left", padx=(SPACE["xl"], 0))
-        for key, text in (("today", "今日"), ("week", "近 7 天"), ("custom", "自定义 ▾")):
+        seg.pack(side="left", padx=(SPACE["lg"], 0))
+        for key, text in (("today", "今日"), ("week", "近 7 天"), ("custom", "自定义")):
             b = ttk.Button(seg, text=text, style="Segment.TButton",
                            command=lambda k=key: self._pick_range(k))
             b.pack(side="left", padx=(0, SPACE["xs"]))
             self._seg[key] = b
 
-        self._range_label = tk.Label(inner, text="", font=font("small"),
-                                     background=COLORS["canvas"],
-                                     foreground=COLORS["ink_mute"])
-        self._range_label.pack(side="left", padx=(SPACE["md"], 0))
+        # 示例数据开关**不放顶栏**：顶栏要装 标题+时间范围+日期+刷新+导出，已经很挤，
+        # 再塞一个复选框会互相挤掉（实测把日期和「导出 CSV」都挤没了）。
+        # 它真正被需要的时刻只有一个：**面板空着、不知道这块讲什么的时候** ——
+        # 入口放在空状态里（见 _render_distribution），进去后横幅上有「退出示例」。
+        self._topbar_sep = tk.Frame(self.win, height=1, background=COLORS["hairline"])
+        self._topbar_sep.pack(fill="x")
 
-        ttk.Button(inner, text="导出 CSV", style="Secondary.TButton",
-                   command=self._export).pack(side="right")
-        ttk.Button(inner, text="刷新 ↻", style="Ghost.TButton",
-                   command=self.refresh).pack(side="right", padx=(0, SPACE["sm"]))
-        tk.Frame(self.win, height=1, background=COLORS["hairline"]).pack(fill="x")
+    def _enter_demo(self):
+        """切到示例数据。当前范围没数据时自动放宽到近 7 天（不然还是空的）。"""
+        self._demo_on = True
+        probe = agg.aggregate(self._start, self._end, root=DEMO_ROOT)
+        if probe.replies == 0 and self._range == "today":
+            self._range = "week"
+            self._end = date.today()
+            self._start = self._end - timedelta(days=6)
+        self.refresh()
+
+    def _exit_demo(self):
+        self._demo_on = False
+        self.refresh()
+
+    def _sync_demo_banner(self):
+        """示例数据时必须**明说**这不是真实数据（免得店主认成自己的经营数据）。"""
+        if self._demo_on:
+            if not getattr(self, "_demo_box", None):
+                self._demo_box = tk.Frame(self.win, background=COLORS["info_bg"])
+                tk.Label(self._demo_box,
+                         text="当前是示例数据（600 条离线评测回放），用来展示各块在讲什么"
+                              " —— 不是你的真实接待记录。",
+                         font=font("small"), background=COLORS["info_bg"],
+                         foreground=COLORS["info"], anchor="w").pack(
+                    side="left", padx=SPACE["md"], pady=SPACE["sm"])
+                ttk.Button(self._demo_box, text="退出示例", style="Ghost.TButton",
+                           command=self._exit_demo).pack(side="right", padx=SPACE["sm"])
+            self._demo_box.pack(fill="x", after=self._topbar_sep)
+        elif getattr(self, "_demo_box", None):
+            self._demo_box.pack_forget()
 
     def _build_kpis(self, parent):
         row = tk.Frame(parent, background=COLORS["canvas_soft"])
@@ -255,15 +315,20 @@ class DashboardWindow:
             btn.configure(style="SegmentOn.TButton" if key == self._range
                           else "Segment.TButton")
         days = (self._end - self._start).days + 1
-        span = (self._start.strftime("%Y-%m-%d") if days == 1
-                else f"{self._start.strftime('%Y-%m-%d')} ~ {self._end.strftime('%Y-%m-%d')}")
+        # 同年时省掉年份，让顶部那排更省空间（差一年才写全）
+        same_year = self._start.year == date.today().year
+        fmt = "%m-%d" if same_year else "%Y-%m-%d"
+        span = (self._start.strftime(fmt) if days == 1
+                else f"{self._start.strftime(fmt)} ~ {self._end.strftime(fmt)}")
         self._range_label.configure(text=f"{span}（{days} 天）")
 
     # ── 刷新与绘制 ─────────────────────────────────────────────────────
 
     def refresh(self):
         self._sync_segments()
-        self._stats = agg.aggregate(self._start, self._end)
+        self._sync_demo_banner()
+        root = DEMO_ROOT if self._demo_on else None
+        self._stats = agg.aggregate(self._start, self._end, root=root)
         self._render_kpis()
         self._draw_chart()
         self._render_distribution()
@@ -376,8 +441,16 @@ class DashboardWindow:
         st = self._stats
         assert st is not None
         total = sum(st.by_path.values())
-        if not total:
+        if total == 0:
             hint(self._dist_host, "这段时间没有接待记录").pack(anchor="w")
+            if not self._demo_on:
+                ttk.Button(self._dist_host, text="用示例数据看看效果",
+                           style="Secondary.TButton",
+                           command=self._enter_demo).pack(anchor="w",
+                                                          pady=(SPACE["sm"], 0))
+                hint(self._dist_host,
+                     "示例数据＝把 600 条离线评测回放成接待记录，不是你的真实数据").pack(
+                    anchor="w", pady=(SPACE["xs"], 0))
             return
         items = [kv for kv in st.by_path.most_common(10)]
         for name, count in items:

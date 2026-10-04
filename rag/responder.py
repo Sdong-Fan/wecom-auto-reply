@@ -26,7 +26,7 @@ from rag.generator import generate_reply, generate_hold_reply
 from rag.guard import (classify_and_dispatch, check_retrieval, high_threshold,
                        UNCERTAINTY_KEYWORDS, GENERIC_REPLY_PATTERNS,
                        HEDGE_PHRASES, out_of_scope, must_escalate,
-                       unsafe_promise, deferral_phrase)
+                       unsafe_promise, deferral_phrase, decision_path_of)
 from rag.judge import should_reply, is_low_information
 from rag.local_answers import answer_locally, now_line
 from rag.smalltalk import classify_message
@@ -131,58 +131,9 @@ class ReplyResult:
     decision_path: str = ""        # 具体是哪条路/哪道护栏（看板统计用，见 decision_path_of）
 
 
-# 决策路径：把"内部字段"翻译成看板能直接分组的短标签。
-#
-# 为什么需要它：guard_decision 只有 pass/block/low_risk 三种，guard_reason 又是
-# 给人看的长句（"越权承诺（库存承诺）"）。看板要按"拦下的原因"分组，
-# 就得有一个稳定的枚举值 —— 否则每次都要在看板里写正则解析日志。
-_PATH_BY_REASON = (
-    ("库存承诺", "越权承诺"), ("留货承诺", "越权承诺"), ("时效承诺", "越权承诺"),
-    ("保证承诺", "越权承诺"), ("承诺接单", "越权承诺"),
-    ("拖延话术", "拖延话术"),
-    ("议价加码", "议价加码"), ("议价特批", "议价特批"), ("比价跟价", "比价跟价"),
-    ("押金特批", "押金特批"), ("费用特批", "费用特批"),
-    ("发票政策未覆盖", "政策未覆盖"), ("政策未覆盖", "政策未覆盖"),
-    ("发票寄送", "订单与发票查询"), ("订单查询", "订单与发票查询"),
-    ("订单变更", "订单变更"), ("退款诉求", "退款与投诉"),
-    ("投诉纠纷", "退款与投诉"), ("收货纠纷", "退款与投诉"), ("要找人", "退款与投诉"),
-    ("重复追问未解决", "退款与投诉"), ("超时未处理", "退款与投诉"),
-    ("库存与档期", "库存与档期"), ("指代不明", "指代不明"),
-    ("店主私事", "店主私事"), ("店内情况", "店主私事"),
-    ("越权操作", "越权操作"), ("要人工", "要人工"),
-    ("非本店业务", "非本店业务"), ("时间承诺", "时间承诺"),
-)
-
-
-def decision_path_of(guard_decision: str, guard_reason: str,
-                     dispatch_level: str, reason: str = "") -> str:
-    """把一次决策归一成一个短标签（看板按它分组统计）。"""
-    gr = guard_reason or ""
-    for needle, label in _PATH_BY_REASON:
-        if needle in gr:
-            return label
-    if guard_decision == "out_of_scope":
-        return "越界婉拒"
-    if guard_decision == "smalltalk":
-        return "闲聊"
-    if guard_decision == "local_answer":
-        return "本地直答"
-    if dispatch_level == "no_reply":
-        return "无信息量/收尾"
-    if guard_decision == "unsafe_promise":
-        return "越权承诺"
-    if guard_decision == "deferral_phrase":
-        return "拖延话术"
-    if guard_decision == "must_escalate":
-        return "必须转人工"
-    if dispatch_level == "auto_send":
-        return "正常直答"
-    if "llm_requests_human" in gr:
-        return "模型要人工"
-    if "检索低" in (reason or "") or "置信度" in (reason or "") \
-            or "retrieval" in gr:
-        return "置信度不足"
-    return "其他"
+# 决策路径归一化（decision_path_of）已挪到 rag/guard.py：
+# 它没有重依赖，离线回放评测结果、生成看板示例数据都要用，
+# 不该因为放在这里而被拖进 torch / pyautogui。已在文件顶部 import 回来。
 
 
 

@@ -30,6 +30,10 @@ KB_SRC = ROOT / "data" / "qdrant"                       # 资料库索引
 DEMO_SRC = ROOT / "data" / "chat_raw"                   # 资料库原始文件（示例资料）
 PROMPTS_SRC = ROOT / "prompts"                          # 提示词
 PROFILES_SRC = ROOT / "profiles"                        # 窗口标定
+# 看板示例数据：把 600 条离线评测回放成接待记录（客户名全虚构、无真实数据）。
+# 带进包是为了让"第一次打开看板"的人有东西可看 —— 否则一片空白，看不出这个功能讲什么。
+# 由 scripts/make_demo_stats.py 生成；没生成过就跳过（不报错）。
+DEMO_STATS_SRC = ROOT / "data" / "demo_stats"
 DOCS_DIR = ROOT / "docs"                                # 详细使用说明的来源（单一源头）
 
 # 要复制的"内容型资产"白名单（测试会检查它不含客户数据）
@@ -178,6 +182,13 @@ def copy_extras():
             if f.is_file() and f.suffix.lower() in keep_ext:
                 shutil.copy2(f, DIST / "data" / "chat_raw" / f.name)
         print(f"   已复制示例资料 {sum(1 for f in DEMO_SRC.iterdir() if f.suffix.lower() in keep_ext)} 个")
+
+    # 看板示例数据（600 条离线评测回放；客户名全虚构）—— 让看板一开就有东西看
+    if DEMO_STATS_SRC.exists():
+        _copy_tree(DEMO_STATS_SRC, DIST / "data" / "demo_stats", "看板示例数据")
+    else:
+        print("   [提示] 没有 data/demo_stats（可跑 scripts/make_demo_stats.py 生成；"
+              "不影响使用，只是看板空着时没有示例可看）")
 
     _copy_tree(PROMPTS_SRC, DIST / "prompts", "提示词 prompts/")
     _copy_tree(PROFILES_SRC, DIST / "profiles", "窗口标定 profiles/")

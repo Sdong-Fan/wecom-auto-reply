@@ -35,10 +35,26 @@ os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")  # skip HF network verification (~10s delay)
 from dotenv import load_dotenv
+
+
+def _app_dir() -> Path:
+    """程序目录：打包后是 exe 所在目录，源码模式是项目根目录。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+# ★ **必须指定路径**，不能写 `load_dotenv()`：
+#   无参时 python-dotenv 会从调用者所在目录**一路往上找** `.env`，
+#   于是把程序解压到别人的项目目录里（或程序目录本身在某个有 .env 的目录下）时，
+#   会静默读走那个**不相干的 .env** ——
+#   实测：把分发包解压到一个带 .env 的目录里，界面密钥框直接显示了别人的密钥，
+#   机器人还会拿那把密钥去调接口。只认自己目录下的 .env，没有就当没配。
+_ENV_FILE = _app_dir() / ".env"
 # override=True：.env 是本程序的配置文件，应当以它为准。
 # 不加的话，如果环境里已经有一个空的 LLM_API_KEY（比如设置面板测试时写过），
 # .env 里真正的密钥反而读不进来。
-load_dotenv(override=True)
+load_dotenv(_ENV_FILE, override=True)
 
 import ctypes
 try:

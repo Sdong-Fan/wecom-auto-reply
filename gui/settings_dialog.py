@@ -21,6 +21,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 import os
 import subprocess
@@ -136,14 +138,18 @@ class SettingsDialog:
 
     def _build_llm(self, body):
         box = self._section(body, "1. LLM 接口（生成回复用）")
-        self._preset = ttk.Combobox(box, state="readonly",
-                                    values=[p[0] for p in PRESETS], width=32)
         prow = tk.Frame(box, background=COLORS["canvas"])
         prow.pack(fill=tk.X, pady=px(3))
         tk.Label(prow, text="预设", width=11, anchor="w", font=font("body"),
                  background=COLORS["canvas"],
                  foreground=COLORS["ink_secondary"]).pack(side=tk.LEFT)
-        self._preset.pack(in_=prow, side=tk.LEFT, fill=tk.X, expand=True)
+        # ★ 父容器必须是 prow。写成 ttk.Combobox(box) + pack(in_=prow) 时，
+        #   Tk 把下拉框的几何算在 box 里、层叠顺序又低于后来 pack 的 prow，
+        #   结果是**文字和下拉箭头被 prow 的底色盖掉**，只剩一个空框
+        #   （实测：winfo_ismapped=1、get() 有值，但框内深色像素数 = 0）。
+        self._preset = ttk.Combobox(prow, state="readonly",
+                                    values=[p[0] for p in PRESETS], width=32)
+        self._preset.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._preset.bind("<<ComboboxSelected>>", self._on_preset)
         # 预选：按当前接口地址匹配预设，匹配不上就选“自定义”
         cur_base = (self._cur.get("llm_base_url") or "").rstrip("/")
@@ -163,6 +169,11 @@ class SettingsDialog:
         hint(box, "地址填到 /v1 为止，不要带 /chat/completions；"
                   "模型名按服务商填（deepseek-chat / qwen-plus / moonshot-v1-8k…）").pack(
             anchor="w", pady=(px(4), 0))
+        # 密钥到底从哪读的 —— 用户问过"我这密钥是哪来的"，直接把文件路径摆出来
+        env_path = store.ENV_PATH
+        hint(box, f"配置保存在：{env_path}"
+                  + ("" if env_path.exists() else "（还没有这个文件，填完点「保存」会生成）")
+             ).pack(anchor="w")
         trow = tk.Frame(box, background=COLORS["canvas"])
         trow.pack(fill=tk.X, pady=(SPACE["sm"], 0))
         ttk.Button(trow, text="测试连接", style="Secondary.TButton",
@@ -295,11 +306,21 @@ class SettingsDialog:
     # ── 测试连接（后台线程，别卡界面）────────────────────────────────
 
     def _run_async(self, fn, label: tk.Label, done_text="测试中…"):
+        """后台跑一个测试函数，把 (ok, 说明) 填到 label 上。
+
+        ★ `fn` 可能是**协程函数**（`llm_client.ping` 就是 async），直接 `fn()`
+        拿到的是 coroutine 对象，`ok, detail = fn()` 会抛
+        `TypeError: cannot unpack non-iterable coroutine object` ——
+        而且协程从未被 await，等于测试根本没跑。所以这里统一识别 awaitable。
+        """
         label.config(text=done_text, foreground=COLORS["ink_mute"])
 
         def work():
             try:
-                ok, detail = fn()
+                result = fn()
+                if inspect.isawaitable(result):
+                    result = asyncio.run(result)
+                ok, detail = result
             except Exception as e:
                 ok, detail = False, f"{type(e).__name__}: {e}"
             color = COLORS["success"] if ok else COLORS["danger"]

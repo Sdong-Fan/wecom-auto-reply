@@ -249,6 +249,12 @@ def apply_theme(root: tk.Misc, scale_factor: float | None = None) -> ttk.Style:
                     darkcolor=c["hairline_strong"], insertcolor=c["ink"], padding=px(4))
     style.configure("TCombobox", fieldbackground=c["canvas"], background=c["canvas"],
                     foreground=c["ink"], arrowcolor=c["ink_mute"], padding=px(3))
+    # clam 的 readonly 下拉框默认是灰底（#dcdad5），和旁边白色输入框不一致 —— 拉平
+    style.map("TCombobox",
+              fieldbackground=[("readonly", c["canvas"])],
+              foreground=[("readonly", c["ink"])],
+              selectbackground=[("readonly", c["canvas"])],
+              selectforeground=[("readonly", c["ink"])])
     style.configure("TCheckbutton", background=c["canvas"], foreground=c["ink_secondary"])
     style.configure("TRadiobutton", background=c["canvas"], foreground=c["ink_secondary"])
 

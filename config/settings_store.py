@@ -51,6 +51,29 @@ SECRET_KEYS = ("LLM_API_KEY", "WECOM_CORP_ID", "WECOM_KF_SECRET", "WECOM_OPEN_KF
 
 _KEY_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
+# .env.example 里的示例值长这样。**必须识别出来**：
+#   启动.bat 第一次运行会把 .env.example 复制成 .env，于是
+#   DEEPSEEK_API_KEY=sk-your-deepseek-key 会出现在设置面板的密钥框里 ——
+#   看着像"已经配好了"，其实是个假密钥，用户会以为是自己填的、或者以为程序有问题。
+_PLACEHOLDER_HINTS = ("your", "xxx", "todo", "changeme", "填这里", "placeholder")
+
+
+def looks_like_placeholder(value: str) -> bool:
+    """这个密钥是不是 .env.example 里那种**示例值**（没真填）？
+
+    真密钥（DeepSeek 的 ``sk-`` + 32 位 hex）不会命中任何一条：
+    * 含 your / xxx / todo / changeme / 填这里 / placeholder → 示例值
+    * 整串只有 x、下划线、横线、星号 → 占位
+    * 空 → 当作没填
+    """
+    s = (value or "").strip().strip('"').strip("'")
+    if not s:
+        return True
+    low = s.lower()
+    if any(h in low for h in _PLACEHOLDER_HINTS):
+        return True
+    return set(low) <= {"x", "_", "-", "*", "0"}
+
 # 软件选择 → (id, 显示名, channel, profile, 备注)
 # ★ 这张表只是**内置推荐项**，不是"只支持这三种"：
 #   profiles/ 目录里任何 *.json 都会被自动发现并出现在设置面板里
@@ -225,11 +248,19 @@ def apply_software(cfg: dict, software_id: str) -> dict:
 
 def read_current_settings(env_path: os.PathLike = None,
                           config_path: os.PathLike = None) -> dict:
-    """面板初始值：把 .env 与 config.json 合成一份（密钥原样返回给输入框）。"""
+    """面板初始值：把 .env 与 config.json 合成一份（密钥原样返回给输入框）。
+
+    **占位符不留到界面上**：第一次启动时 .env 是从 .env.example 复制来的，
+    里面的 ``sk-your-deepseek-key`` 会填进密钥框、看着像配置好了。
+    这里一律当"没填"，让用户看到空框 + 自己去填 —— 比让他对着假密钥猜好。
+    """
     env = read_env(env_path)
     cfg = load_config(config_path)
+    key = env.get("LLM_API_KEY") or env.get("DEEPSEEK_API_KEY", "")
+    if looks_like_placeholder(key):
+        key = ""
     return {
-        "llm_api_key": env.get("LLM_API_KEY") or env.get("DEEPSEEK_API_KEY", ""),
+        "llm_api_key": key,
         "llm_base_url": env.get("LLM_BASE_URL") or env.get("DEEPSEEK_BASE_URL", ""),
         "llm_model": env.get("LLM_MODEL", ""),
         "wecom_corp_id": env.get("WECOM_CORP_ID", ""),

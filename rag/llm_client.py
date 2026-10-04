@@ -46,9 +46,34 @@ _client: Optional[AsyncOpenAI] = None
 _client_sig: Optional[Tuple[str, str]] = None
 
 
+def _raw_key() -> str:
+    return (os.environ.get("LLM_API_KEY")
+            or os.environ.get("DEEPSEEK_API_KEY") or "").strip()
+
+
+def _is_placeholder(value: str) -> bool:
+    """密钥是不是 .env.example 里的示例值（``sk-your-deepseek-key``）？
+
+    懒导入，避免启动期模块互相牵。
+    """
+    try:
+        from config.settings_store import looks_like_placeholder
+        return looks_like_placeholder(value)
+    except Exception:
+        low = (value or "").strip().lower()
+        return (not low) or ("your" in low) or low.startswith("placeholder")
+
+
 def resolve_config() -> Tuple[str, str, str]:
-    """返回 (api_key, base_url, model)。优先 LLM_*，回落 DEEPSEEK_*。"""
-    key = os.environ.get("LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY") or ""
+    """返回 (api_key, base_url, model)。优先 LLM_*，回落 DEEPSEEK_*。
+
+    ★ **示例占位符一律当作"没填"**：第一次启动时 .env 是 .env.example 复制来的，
+    里面 ``DEEPSEEK_API_KEY=sk-your-deepseek-key`` 看着像密钥，拿它去调接口只会拿 401。
+    当成没填 → 走"不填 Key 也能开"的既定设计（只转人工、不外发任何内容）。
+    """
+    key = _raw_key()
+    if _is_placeholder(key):
+        key = ""
     base = (os.environ.get("LLM_BASE_URL")
             or os.environ.get("DEEPSEEK_BASE_URL") or DEFAULT_BASE_URL)
     model = os.environ.get("LLM_MODEL") or DEFAULT_MODEL
@@ -132,6 +157,12 @@ async def ping(timeout: float = 25.0) -> Tuple[bool, str]:
     """
     key, base, model = resolve_config()
     if not key:
+        raw = _raw_key()
+        if raw:
+            # 最常见的一种：第一次启动时 .env 是 .env.example 复制来的，
+            # 里面那个示例值看着像密钥，用户以为已经配好了
+            return False, (f"现在填的是示例里的占位符（{raw[:14]}…），不是真密钥 —— "
+                           f"请换成你自己的 API Key")
         return False, "还没填密钥"
     try:
         text = await asyncio.wait_for(

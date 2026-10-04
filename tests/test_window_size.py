@@ -19,10 +19,14 @@ def test_window_min_width_at_least_700():
 
 
 def test_window_fits_content_instead_of_hardcoding():
-    """按内容自适应：宽度跟随控件实际需要，只受屏幕约束。"""
+    """窗口有**紧凑上限**，且窄了要能换行重排（而不是把按钮裁掉）。"""
     assert "_fit_window" in SOURCE
     block = SOURCE[SOURCE.index("def _fit_window"):]
     end = block.find("\n    def ", 10)
     block = block[:end] if end != -1 else block
-    assert "winfo_reqwidth" in block, "要量内容所需宽度"
-    assert "screen_w" in block, "只受屏幕宽度约束（别再封顶成固定像素）"
+    assert "px(820)" in block, "要有紧凑上限（以前按内容无限撑开，会占掉半个屏幕）"
+    assert "screen_w" in block, "还要受屏幕宽度约束"
+    # 窄窗口时按钮换行，而不是被裁
+    assert "_reflow_header" in SOURCE
+    assert "grid_configure" in SOURCE, "换行要用 grid 挪行列（pack 做不到）"
+    assert "minsize" in SOURCE, "要设最小尺寸，否则能拖到布局散架"

@@ -98,23 +98,28 @@ def detect_dpi_scale(root: tk.Misc) -> float:
         return 1.0
 
 
-# ── 字号（8px 栅格之外的唯一例外是字号，按"能否一眼分清层级"定）─────────────
-# tkinter 只有 normal/bold，所以层级 = 字号 + 颜色，别指望字重
+# ── 字号（**单位是像素，不是点**）──────────────────────────────────────────
+#
+# ★ 2026-10-04 踩的坑：原来这里写的是"点"（如 body=12），而 Tk 会把点按
+#   `tk scaling`（本机 2.0，即 144dpi）换算成像素 —— 于是"我自己的 DPI 缩放 1.5"
+#   与"Tk 的点→像素 ×2"**叠乘**：一个 12pt 正文渲染成 36px 宽的汉字，
+#   按钮 273px 宽、标题 422px 宽、窗口被撑到 1600+（用户反馈"主页面怎么变这么大"）。
+#   改成**像素字号**（tkinter 里负数即像素）后，字号与 px() 间距同单位，
+#   缩放只由我们自己控制一次，尺寸可预测。
 SIZES = {
-    "kpi": 26,       # 大数字
-    "h1": 17,        # 页面标题
-    "h2": 14,        # 卡片标题
-    "h3": 13,        # 小节标题
-    "body": 12,      # 正文（Windows 100% 缩放下最耐看的中文大小）
-    "small": 11,     # 辅助说明
-    "micro": 10,     # 标签/角标
+    "kpi": 28,       # 大数字
+    "h1": 19,        # 页面标题
+    "h2": 16,        # 卡片标题
+    "h3": 14,        # 小节标题
+    "body": 13,      # 正文
+    "small": 12,     # 辅助说明
+    "micro": 11,     # 标签/角标
 }
 
 
 def font(size_key: str = "body", bold: bool = False):
-    """按语义取字体元组（字号跟着缩放走）。"""
-    base = SIZES.get(size_key, SIZES["body"])
-    return (FONT_FAMILY, max(8, int(round(base * _SCALE))),
+    """按语义取字体元组。**像素字号**（负数）—— 见上面 SIZES 的说明。"""
+    return (FONT_FAMILY, -px(SIZES.get(size_key, SIZES["body"])),
             "bold" if bold else "normal")
 
 
@@ -147,6 +152,16 @@ def apply_theme(root: tk.Misc, scale_factor: float | None = None) -> ttk.Style:
     c = COLORS
     style.configure(".", background=c["canvas_soft"], foreground=c["ink"],
                     font=font("body"))
+    # 具名字体（对话框、Treeview 默认值、messagebox 等都用它）也要改成像素字号，
+    # 否则那些地方还是按点渲染，尺寸对不上
+    from tkinter import font as tkfont
+    for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont",
+                 "TkTooltipFont", "TkIconFont"):
+        try:
+            tkfont.nametofont(name).configure(family=FONT_FAMILY,
+                                              size=-px(SIZES["body"]))
+        except Exception:
+            pass
 
     # ── 容器 ────────────────────────────────────────────────────────────
     style.configure("TFrame", background=c["canvas_soft"])

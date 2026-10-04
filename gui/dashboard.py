@@ -96,11 +96,11 @@ class DashboardWindow:
         #   「近 7 天/自定义」被裁、窗口拉大后中间又一坨空白。
         #   设计稿宽 1220（theme 里 scale=1 时的样子）。
         self._base_scale = detect_dpi_scale(self.win)
-        natural_w = int(1220 * self._base_scale)
-        natural_h = int(880 * self._base_scale)
+        natural_w = int(1120 * self._base_scale)
+        natural_h = int(760 * self._base_scale)
         sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
-        w = max(int(900 * self._base_scale), min(natural_w, sw - 80))
-        h = max(int(640 * self._base_scale), min(natural_h, sh - 120))
+        w = max(int(860 * self._base_scale), min(natural_w, sw - 80))
+        h = max(int(600 * self._base_scale), min(natural_h, sh - 120))
         self.win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 3}")
         self.win.minsize(int(780 * self._base_scale), int(520 * self._base_scale))
         self.win.protocol("WM_DELETE_WINDOW", self._close)
@@ -134,7 +134,7 @@ class DashboardWindow:
             return
         if w <= 1:
             return
-        natural_w = max(1, int(1220 * self._base_scale))
+        natural_w = max(1, int(1120 * self._base_scale))
         target = set_scale(self._base_scale * (w / natural_w))
         if abs(target - self._scale_now) < 0.06:
             return                     # 变化太小不重建，避免抖动

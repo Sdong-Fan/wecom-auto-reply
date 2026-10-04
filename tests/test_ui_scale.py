@@ -36,14 +36,18 @@ def test_scale_is_clamped():
     assert theme.set_scale(9.9) == theme.MAX_SCALE
 
 
-def test_font_size_scales():
+def test_font_size_is_pixels_and_scales():
+    """字号必须是**像素**（tkinter 里是负数）—— 用"点"会被 Tk 的 tk scaling 再放大一次，
+    和我们的缩放叠乘，界面就会翻倍变大（2026-10-04 实测踩坑）。"""
     theme.set_scale(1.0)
-    assert theme.font("body")[1] == theme.SIZES["body"]
+    size = theme.font("body")[1]
+    assert size < 0, "像素字号是负数"
+    assert abs(size) == theme.SIZES["body"]
     theme.set_scale(1.5)
-    assert theme.font("body")[1] == int(round(theme.SIZES["body"] * 1.5))
-    # 再小也不能小于 8pt（否则中文糊成一团）
+    assert abs(theme.font("body")[1]) == int(round(theme.SIZES["body"] * 1.5))
+    # 缩到很小时 micro 字号也不能小于 9px（再小中文就糊了）
     theme.set_scale(0.8)
-    assert theme.font("micro")[1] >= 8
+    assert abs(theme.font("micro")[1]) >= 9
 
 
 def test_detect_dpi_scale_bounds():

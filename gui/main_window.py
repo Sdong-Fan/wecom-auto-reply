@@ -1,4 +1,4 @@
-# gui/main_window.py
+﻿# gui/main_window.py
 """主控窗口模块 — tkinter GUI
 
 职责：
@@ -18,6 +18,8 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import ttk, messagebox
 from typing import Callable, Dict, List, Optional
+
+from gui.theme import COLORS, SPACE, apply_theme, font
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +49,16 @@ class MainWindow:
     """主控窗口"""
 
     def __init__(self, on_pause: Callable = None, on_resume: Callable = None,
-                 on_settings: Callable = None, on_kb: Callable = None):
+                 on_settings: Callable = None, on_kb: Callable = None,
+                 on_dashboard: Callable = None):
         self.on_pause = on_pause
         self.on_resume = on_resume
         # 「设置」常驻在头部，任何状态（未启动/运行中/已配置过）都能点开重配
         self.on_settings = on_settings
         # 「知识库」：编辑提示词 / 管理资料库（常驻，任何时候可点）
         self.on_kb = on_kb
+        # 「数据」：运营看板（今日/近7天/自定义；我该补什么资料）
+        self.on_dashboard = on_dashboard
         self._records: List[MessageRecord] = []
         # 默认**未启动**：打开程序不会自动开始扫描/回复，先让用户确认配置再点「开始」。
         # 已有的暂停机制本来就同时挡住两条通道（截图扫描与 API 轮询），所以直接复用。
@@ -86,9 +91,13 @@ class MainWindow:
         self.root.title("企业微信智能客服")
         # 右上角定位
         sw = self.root.winfo_screenwidth()
-        self.root.geometry(f"700x280+{sw - 720}+10")
+        self.root.geometry(f"720x300+{sw - 740}+10")
         self.root.attributes('-topmost', True)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # ★ 先把设计系统装上（ttk 样式必须在创建控件之前生效）
+        apply_theme(self.root)
+        self.root.configure(background=COLORS["canvas_soft"])
 
         # 顶部标题栏
         self._create_header()
@@ -106,28 +115,42 @@ class MainWindow:
         self._create_footer()
 
     def _create_header(self):
-        """创建顶部标题栏"""
-        header = ttk.Frame(self.root)
-        header.pack(fill=tk.X, padx=10, pady=5)
+        """创建顶部标题栏（按 gui/theme.py 的设计系统：白底 + 发丝线分隔）"""
+        header = tk.Frame(self.root, background=COLORS["canvas"])
+        header.pack(fill=tk.X)
+        row = tk.Frame(header, background=COLORS["canvas"])
+        row.pack(fill=tk.X, padx=SPACE["md"], pady=(SPACE["sm"], SPACE["sm"]))
 
-        title = ttk.Label(header, text="企业微信智能客服", font=("微软雅黑", 14, "bold"))
-        title.pack(side=tk.LEFT)
+        tk.Label(row, text="企业微信智能客服", font=font("h1", True),
+                 background=COLORS["canvas"],
+                 foreground=COLORS["ink"]).pack(side=tk.LEFT)
 
-        # 按钮
-        btn_frame = ttk.Frame(header)
+        btn_frame = tk.Frame(row, background=COLORS["canvas"])
         btn_frame.pack(side=tk.RIGHT)
 
-        self._pause_btn = ttk.Button(btn_frame,
-                                     text="停止" if self._autostart else "开始",
-                                     command=self._toggle_pause)
-        self._pause_btn.pack(side=tk.LEFT, padx=5)
+        self._pause_btn = ttk.Button(
+            btn_frame, text="停止" if self._autostart else "开始",
+            style="Primary.TButton", command=self._toggle_pause)
+        self._pause_btn.pack(side=tk.LEFT, padx=(0, SPACE["xs"]))
 
-        # 设置按钮：常驻，任何时候都能重新配置（换软件 / 换 API key / 改模型）
-        self._kb_btn = ttk.Button(btn_frame, text="知识库", command=self._on_kb_clicked)
-        self._kb_btn.pack(side=tk.LEFT, padx=5)
+        # 数据看板：店主最该常点的地方（"机器人替我做了什么 / 我该补什么资料"）
+        self._dash_btn = ttk.Button(btn_frame, text="数据", style="Secondary.TButton",
+                                    command=self._on_dashboard_clicked)
+        self._dash_btn.pack(side=tk.LEFT, padx=SPACE["xs"])
 
-        self._settings_btn = ttk.Button(btn_frame, text="设置", command=self._on_settings_clicked)
-        self._settings_btn.pack(side=tk.LEFT, padx=5)
+        self._kb_btn = ttk.Button(btn_frame, text="知识库", style="Secondary.TButton",
+                                  command=self._on_kb_clicked)
+        self._kb_btn.pack(side=tk.LEFT, padx=SPACE["xs"])
+
+        self._settings_btn = ttk.Button(btn_frame, text="设置", style="Ghost.TButton",
+                                        command=self._on_settings_clicked)
+        self._settings_btn.pack(side=tk.LEFT, padx=(SPACE["xs"], 0))
+
+        tk.Frame(header, height=1, background=COLORS["hairline"]).pack(fill=tk.X)
+
+    def _on_dashboard_clicked(self):
+        if self.on_dashboard:
+            self.on_dashboard()
 
     def _on_kb_clicked(self):
         if self.on_kb:
@@ -143,17 +166,18 @@ class MainWindow:
         原来的坑：目标软件没打开时扫描会静默 return，界面还写着"运行中"，
         用户完全不知道问题在哪。
         """
-        self._banner = ttk.Label(self.root, text="", anchor="w",
-                                 font=("微软雅黑", 10), foreground="#8a6d00",
-                                 background="#fff8e1", padding=(8, 5))
-        self._banner.pack(fill=tk.X, padx=10, pady=(0, 2))
+        self._banner = tk.Label(self.root, text="", anchor="w",
+                                font=font("small"), foreground=COLORS["warning"],
+                                background=COLORS["warning_bg"],
+                                padx=SPACE["md"], pady=SPACE["sm"])
+        self._banner.pack(fill=tk.X, padx=SPACE["md"], pady=(0, SPACE["xs"]))
 
     def set_banner(self, text: str, level: str = "warn"):
         """更新横幅。level: warn=黄 / error=红 / ok=绿（空文本＝隐藏）。"""
         colors = {
-            "warn": ("#fff8e1", "#8a6d00"),
-            "error": ("#fdecea", "#b3261e"),
-            "ok": ("#e8f5e9", "#1b5e20"),
+            "warn": (COLORS["warning_bg"], COLORS["warning"]),
+            "error": (COLORS["danger_bg"], COLORS["danger"]),
+            "ok": (COLORS["success_bg"], COLORS["success"]),
         }
         bg, fg = colors.get(level, colors["warn"])
         try:
@@ -161,47 +185,54 @@ class MainWindow:
                 self._banner.pack_forget()
                 return
             self._banner.config(text=text, background=bg, foreground=fg)
-            self._banner.pack(fill=tk.X, padx=10, pady=(0, 2))
+            self._banner.pack(fill=tk.X, padx=SPACE["md"], pady=(0, SPACE["xs"]))
         except Exception:
             pass
 
     def _create_status_bar(self):
         """创建状态栏"""
-        status_frame = ttk.Frame(self.root)
-        status_frame.pack(fill=tk.X, padx=10, pady=5)
+        status_frame = tk.Frame(self.root, background=COLORS["canvas_soft"])
+        status_frame.pack(fill=tk.X, padx=SPACE["md"], pady=(SPACE["xs"], SPACE["xs"]))
 
-        self._status_label = ttk.Label(
-            status_frame, text="状态: 运行中" if self._autostart else "状态: 未启动")
+        self._status_label = tk.Label(
+            status_frame, text="状态：运行中" if self._autostart else "状态：未启动",
+            font=font("small", True), background=COLORS["canvas_soft"],
+            foreground=COLORS["ink_secondary"])
         self._status_label.pack(side=tk.LEFT)
 
-        ttk.Separator(status_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+        tk.Frame(status_frame, width=1, height=14,
+                 background=COLORS["hairline"]).pack(side=tk.LEFT, fill=tk.Y,
+                                                     padx=SPACE["md"])
 
-        self._stats_label = ttk.Label(
-            status_frame,
-            text="已回复: 0 | 待人工: 0",
-        )
+        self._stats_label = tk.Label(
+            status_frame, text="已回复 0　待人工 0", font=font("small"),
+            background=COLORS["canvas_soft"], foreground=COLORS["ink_mute"])
         self._stats_label.pack(side=tk.LEFT)
 
     def _create_tabs(self):
         """创建标签页"""
-        tab_frame = ttk.Frame(self.root)
-        tab_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        tab_frame = tk.Frame(self.root, background=COLORS["canvas_soft"])
+        tab_frame.pack(fill=tk.BOTH, expand=True, padx=SPACE["md"], pady=SPACE["xs"])
 
         # 标签栏
-        tab_bar = ttk.Frame(tab_frame)
+        tab_bar = tk.Frame(tab_frame, background=COLORS["canvas_soft"])
         tab_bar.pack(fill=tk.X)
 
         self._tab_buttons = {}
         tabs = ["全部", "已回复", "待人工"]
         for tab in tabs:
             btn = ttk.Button(
-                tab_bar, text=tab,
+                tab_bar, text=tab, style="Segment.TButton",
                 command=lambda t=tab: self._switch_tab(t),
             )
-            btn.pack(side=tk.LEFT, padx=2)
+            btn.pack(side=tk.LEFT, padx=(0, SPACE["xs"]))
             self._tab_buttons[tab] = btn
 
         self._current_tab = "全部"
+        # 初始化时也要点亮一次选中态，否则一进来三个标签看着都"没选中"
+        for name, b in self._tab_buttons.items():
+            b.configure(style="SegmentOn.TButton" if name == "全部"
+                        else "Segment.TButton")
 
         # ── message list treeview ──────────────────────────────────
 
@@ -272,11 +303,13 @@ class MainWindow:
 
     def _create_footer(self):
         """创建底部按钮"""
-        footer = ttk.Frame(self.root)
-        footer.pack(fill=tk.X, padx=10, pady=5)
+        footer = tk.Frame(self.root, background=COLORS["canvas"])
+        footer.pack(fill=tk.X, padx=SPACE["md"], pady=(0, SPACE["sm"]))
 
-        ttk.Button(footer, text="导出记录", command=self._export_csv).pack(side=tk.LEFT, padx=5)
-        ttk.Button(footer, text="清空", command=self._clear_records).pack(side=tk.LEFT, padx=5)
+        ttk.Button(footer, text="导出记录", style="Ghost.TButton",
+                   command=self._export_csv).pack(side=tk.LEFT)
+        ttk.Button(footer, text="清空", style="Ghost.TButton",
+                   command=self._clear_records).pack(side=tk.LEFT, padx=(SPACE["xs"], 0))
 
 
     def _toggle_pause(self):
@@ -284,13 +317,13 @@ class MainWindow:
         self._paused = not self._paused
         if self._paused:
             self._pause_btn.config(text="开始")
-            self._status_label.config(text="状态: 未启动")
+            self._status_label.config(text="状态：未启动")
             self.set_banner("未启动。点「开始」运行，或点「设置」重新配置。", level="warn")
             if self.on_pause:
                 self.on_pause()
         else:
             self._pause_btn.config(text="停止")
-            self._status_label.config(text="状态: 运行中")
+            self._status_label.config(text="状态：运行中")
             # 清掉"未启动"横幅；若目标软件不在，扫描线程下一轮会用红字顶回来
             self.set_banner("")
             if self.on_resume:
@@ -303,6 +336,10 @@ class MainWindow:
     def _switch_tab(self, tab: str):
         """切换标签页"""
         self._current_tab = tab
+        # 选中的标签用"选中态"样式（靛蓝浅底 + 靛蓝字），一眼看出在看哪一页
+        for name, btn in self._tab_buttons.items():
+            btn.configure(style="SegmentOn.TButton" if name == tab
+                          else "Segment.TButton")
         if tab == "待人工":
             self._list_frame.pack_forget()
             self._pending_frame.pack(fill=tk.BOTH, expand=True)
@@ -337,10 +374,17 @@ class MainWindow:
             )
 
     def _get_action_text(self, action: str) -> str:
-        """获取动作文本"""
+        """把内部代号翻成人话（别把 escalate / no_reply 这种词漏给店主看）"""
         mapping = {
-            "replied": "已回复客户",
+            "replied": "已自动回复",
+            "auto_send": "已自动回复",
             "escalated": "已转人工",
+            "escalate": "已转人工",
+            "human_handle": "已转人工",
+            "human_confirm": "待人工确认",
+            "no_reply": "无需回复",
+            "hold": "已回占位语",
+            "greeting": "已发欢迎语",
         }
         return mapping.get(action, action)
 
@@ -375,10 +419,9 @@ class MainWindow:
             self._update_stats()
 
     def _update_stats(self):
-        """更新统计信息"""
+        """更新统计信息（本次会话；历史统计在「数据」看板里）"""
         self._stats_label.config(
-            text=f"已回复: {self._stats['replied']} | "
-                 f"待人工: {self._stats['escalated']}"
+            text=f"已回复 {self._stats['replied']}　待人工 {self._stats['escalated']}"
         )
 
     def _on_close(self):

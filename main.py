@@ -197,10 +197,25 @@ def _main_impl():
             log.error(f"打开知识库面板失败: {e}\n{traceback.format_exc()}")
             window.set_banner(f"知识库面板打开失败：{e}", level="error")
 
+    def _open_dashboard():
+        """点「数据」打开运营看板（只读聚合本机日志，不发送、不修改数据）。"""
+        try:
+            from gui.dashboard import DashboardWindow
+            from rag.retriever import active_collection
+            window._dashboard = DashboardWindow(
+                window.root,
+                qdrant=getattr(responder, "qdrant", None),
+                collection=active_collection(),
+                cfg=cfg)
+        except Exception as e:
+            log.error(f"打开看板失败: {e}\n{traceback.format_exc()}")
+            window.set_banner(f"看板打开失败：{e}", level="error")
+
     def _after_kb_saved(key):
         window.set_banner(f"「{key}」提示词已保存，立即生效。", level="ok")
 
-    window = MainWindow(on_settings=_open_settings, on_kb=_open_kb)
+    window = MainWindow(on_settings=_open_settings, on_kb=_open_kb,
+                        on_dashboard=_open_dashboard)
 
     # 待人工队列：置信度不足的消息连同 AI 草稿一起放这里，
     # 在 GUI「待人工」页可以选择直接发送或编辑后发送

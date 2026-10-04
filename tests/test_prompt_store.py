@@ -121,7 +121,10 @@ def test_kb_button_exists_and_wired():
     m = (ROOT / "main.py").read_text(encoding="utf-8")
     assert 'text="知识库"' in w
     assert "on_kb" in w
-    assert "MainWindow(on_settings=_open_settings, on_kb=_open_kb)" in m
+    # 2026-10-03：MainWindow 构造参数多了 on_dashboard（数据看板），
+    # 所以这里校验"接线还在"，而不是钉死一整行
+    assert "on_kb=_open_kb" in m
+    assert "on_dashboard=_open_dashboard" in m
     assert "from gui.kb_dialog import open_kb" in m
 
 

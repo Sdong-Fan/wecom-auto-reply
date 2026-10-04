@@ -1,4 +1,4 @@
-"""启动状态与界面反馈：默认**未启动** + 常驻「设置」按钮 + 状态横幅。
+﻿"""启动状态与界面反馈：默认**未启动** + 常驻「设置」按钮 + 状态横幅。
 
 为什么改：原来打开程序就自动开始扫描；目标软件没开时 `_run_scan` 裸 return，
 界面还写着"运行中"、日志一个字都没有 —— 用户完全不知道为什么客户没收到回复。
@@ -32,7 +32,7 @@ def test_default_is_stopped():
     assert "self._paused = not self._autostart" in src, \
         "默认必须是未启动，不能一打开就扫描"
     assert 'WECOM_AUTOSTART' in src
-    assert 'text="状态: 运行中" if self._autostart else "状态: 未启动"' in src, \
+    assert 'text="状态：运行中" if self._autostart else "状态：未启动"' in src, \
         "状态栏初值要跟着 autostart 走"
     assert 'self._paused = not self._autostart' in src
 
@@ -48,7 +48,7 @@ def test_toggle_from_stopped_to_running():
     w._toggle_pause()
     assert w._paused is False
     w._pause_btn.config.assert_called_with(text="停止")
-    w._status_label.config.assert_called_with(text="状态: 运行中")
+    w._status_label.config.assert_called_with(text="状态：运行中")
     w.on_resume.assert_called_once()
 
 

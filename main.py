@@ -298,6 +298,11 @@ def _main_impl():
                           "点「开始」运行，或点「设置」重新配置。", level="warn")
 
     # ★ 没配模型接口时的提示（守卫本体是模块级的 _can_start，见文件开头）
+    #
+    # ⚠️ 这里**不能写 `root.after(...)`**：`root` 是 `_main_impl` 的局部变量，
+    #    要到后面 `root = tk.Tk()` 才赋值；在赋值前引用它（哪怕在闭包里）
+    #    会直接 UnboundLocalError —— 实测打包版一启动就崩在第 311 行。
+    #    前面那句 window.set_banner 是同步调用，所以这里也直接调用即可。
     def _check_llm_ready():
         ok, _why = _can_start()
         if ok:
@@ -308,7 +313,7 @@ def _main_impl():
             "⚠️ 还没配模型接口 —— 点「开始」会被拦下。"
             "请点「设置」填 API Key（任意 OpenAI 兼容服务）。", level="error")
 
-    root.after(400, _check_llm_ready)
+    _check_llm_ready()
 
     def _refresh_pending_tab():
         """刷新 GUI 的待人工页。"""

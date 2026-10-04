@@ -19,7 +19,8 @@ from datetime import datetime
 from tkinter import ttk, messagebox
 from typing import Callable, Dict, List, Optional
 
-from gui.theme import COLORS, SPACE, apply_theme, detect_dpi_scale, font, px
+from gui.theme import (COLORS, SPACE, apply_theme, detect_dpi_scale, font, px,
+                       scale as _ui_scale)
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,20 @@ class MainWindow:
         h = max(px(320), min(need_h + px(8), px(520), screen_h - px(80)))
         x = max(0, screen_w - w - px(20))
         self.root.geometry(f"{w}x{h}+{x}+{px(10)}")
-        self.root.after(80, self._reflow_header)
+        # ★ 多次重排：首次（80ms）此时窗口可能还没真正映射，winfo_width() 不可靠；
+        #   映射之后（400ms / 1.2s）再用**真实几何**复核一遍 —— 打包版在 150% 缩放
+        #   的机器上就是"按请求宽度算能放下、实际放不下"，把「知识库/设置」裁到了屏幕外。
+        for delay in (80, 400, 1200):
+            self.root.after(delay, self._reflow_header)
+
+    def _header_bar_overflows(self) -> bool:
+        """按钮条实际画出来之后，右边缘有没有超出窗口？（比 reqwidth 可靠）"""
+        try:
+            self.root.update_idletasks()
+            right = self._btn_bar.winfo_x() + self._btn_bar.winfo_width()
+            return right > self.root.winfo_width() - px(SPACE["sm"])
+        except Exception:
+            return False
 
     def _reflow_header(self):
         """窄窗口时把次要按钮**换到第二行** —— 而不是让它们被裁掉/盖住。
@@ -167,6 +181,37 @@ class MainWindow:
         except Exception:
             return
         inline = need <= avail
+        # ★ 已经在第一行、但**实际画出来**右边缘超出窗口 → 强制换行。
+        #   为什么需要这道：`winfo_reqwidth()` 是按控件请求宽度算的，在 DPI 缩放
+        #   不一致的环境里会"算着能放下、实际放不下" —— 打包版实测「知识库/设置」
+        #   被裁到窗口外。真实几何比请求宽度可靠。
+        if inline and getattr(self, "_header_inline", None) is True \
+                and self._header_bar_overflows():
+            self._wrap_above = self.root.winfo_width()
+            inline = False
+        elif inline and getattr(self, "_wrap_above", 0) \
+                and self.root.winfo_width() <= self._wrap_above + px(40):
+            # 还没明显变宽，别又试回第一行（否则 1.2s 那次复核会把它翻回来）
+            inline = False
+        # 布局数值落日志：这类"按钮被裁"的问题只有真实数字能定位
+        # （用户反馈过一次、打包版实测又一次，都靠这几个数才找对原因）。
+        # 只在数值变化时记一行 —— 拖窗口时不会刷屏。
+        try:
+            import logging as _logging
+            sig = (self.root.winfo_width(), avail, need,
+                   self._btn_bar.winfo_width(), inline)
+            if sig != getattr(self, "_layout_sig", None):
+                self._layout_sig = sig
+                _logging.getLogger(__name__).info(
+                    "头部布局: 窗口=%d 可用=%d 需要=%d 按钮条=%d 右边缘=%d "
+                    "第一行=%s 缩放=%.2f",
+                    self.root.winfo_width(), avail, need,
+                    self._btn_bar.winfo_width(),
+                    self._btn_bar.winfo_x() + self._btn_bar.winfo_width(),
+                    inline, _ui_scale())
+        except Exception:
+            pass
+
         if inline == getattr(self, "_header_inline", None):
             return
         self._header_inline = inline

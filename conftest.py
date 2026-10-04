@@ -34,3 +34,11 @@ if not os.environ.get("NO_TORCH_PRELOAD"):
     except Exception:  # pragma: no cover
         # 环境未装 torch 时不应阻断纯逻辑测试
         pass
+
+
+def pytest_configure(config):
+    """注册自定义标记，免得 pytest 报 Unknown pytest.mark。"""
+    config.addinivalue_line(
+        "markers",
+        "slow: 会真的把程序拉起来（约 25 秒），默认不跑；"
+        "设 RUN_STARTUP_SMOKE=1 才启用")

@@ -13,7 +13,7 @@ SKIP_EMBED_TESTS=1 python -m pytest tests/ -q    # 日常开发用
 python -m pytest tests/test_video_qa.py -v       # embedding 测试 (需隔离)
 
 # 评估
-python -m eval.run                                # 20 条 QA + LLM 裁判 → logs/eval_report.txt
+python scripts/eval_set.py     # 46 题评测集（尺子）；200 条体检见 scripts/eval_messages_200*.py
 
 # 打包 (详见 .claude/skills/packaging.md)
 python scripts/build.py                           # PyInstaller → dist/WeComBot/

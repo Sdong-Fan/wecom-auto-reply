@@ -1,4 +1,4 @@
-﻿# gui/main_window.py
+# gui/main_window.py
 """主控窗口模块 — tkinter GUI
 
 职责：
@@ -89,9 +89,9 @@ class MainWindow:
         """创建窗口"""
         self.root = tk.Tk()
         self.root.title("企业微信智能客服")
-        # 右上角定位
+        # 先给个大致位置（建控件期间别在屏幕角落闪）
         sw = self.root.winfo_screenwidth()
-        self.root.geometry(f"720x300+{sw - 740}+10")
+        self.root.geometry(f"760x320+{sw - 780}+10")
         self.root.attributes('-topmost', True)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -113,6 +113,24 @@ class MainWindow:
 
         # 底部按钮
         self._create_footer()
+
+        # ★ 按内容自适应尺寸：换主题后标题与按钮都变宽了，
+        #   在 125%/150% 缩放的屏幕上固定 720px 会把「知识库/设置」裁掉
+        #   （打包版实测界面右边被切）。这里量一次控件要求的尺寸再定窗口大小。
+        self._fit_window(sw)
+
+    def _fit_window(self, screen_w: int):
+        """让窗口刚好装得下内容，并贴在屏幕右上角。"""
+        try:
+            self.root.update_idletasks()
+            need_w = self.root.winfo_reqwidth()
+            need_h = self.root.winfo_reqheight()
+        except Exception:
+            return
+        w = max(760, min(1180, need_w + 8))
+        h = max(320, min(760, need_h + 8))
+        x = max(0, screen_w - w - 20)
+        self.root.geometry(f"{w}x{h}+{x}+10")
 
     def _create_header(self):
         """创建顶部标题栏（按 gui/theme.py 的设计系统：白底 + 发丝线分隔）"""

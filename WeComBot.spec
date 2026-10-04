@@ -53,6 +53,14 @@ hiddenimports = [
     "psutil",
     "numpy",
     "dotenv",
+    # ── 本项目的模块（函数里懒加载的，显式列出最稳）──────────────────
+    # 运营看板与设计系统：main.py 的 _open_dashboard() 里才 import。
+    # PyInstaller 能扫到函数体，但显式写下来不会因为以后改成字符串导入
+    # 而静默漏收 —— 漏了的表现是"点了「数据」没反应"，很难排查
+    "gui.theme",
+    "gui.dashboard",
+    "gui.kb_edit",
+    "stats.aggregate",
     "asyncio",
     "queue",
     "json",

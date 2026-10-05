@@ -83,19 +83,40 @@ def list_entries(client, collection: str = None, offset: int = 0,
                  limit: int = 100, keyword: str = "") -> List[dict]:
     """翻页取条目。``keyword`` 给了就在**取回的这一页**里做文本过滤。
 
-    本地模式没有全文检索，所以关键词过滤只能在客户端做 —— 因此宁可一次多取点
-    （默认 100 条），也别让用户以为"搜不到就是没有"。
+    ★ 2026-10-06 修「翻页是假的」：
+    原来把数字 ``offset`` 直接传给 ``client.scroll(offset=...)`` ——
+    但 Qdrant 的 scroll 是**游标分页**，那个参数要的是**上一页返回的
+    ``next_page_offset``**（一个 point id），**不是数字偏移**。
+    我们的 id 是 UUID，传 ``100`` 等于"从 id=100 这个点往后找"，
+    找不到就从头开始 —— 结果**每一页都返回同一批**，点上一页/下一页没任何变化。
+    （而且真正的游标 ``_next`` 原来被丢掉了。）
+
+    现在按游标逐页走到目标页：本地模式数据量小，翻到第 3 页也就 3 次 scroll。
     """
     collection = _col(collection)
+    limit = max(1, int(limit))
+    want = max(0, int(offset))
+    kw = (keyword or "").strip()
     out: List[dict] = []
     try:
+        cursor = None
+        remaining = want
+        while remaining > 0:
+            step = min(limit, remaining)
+            batch, cursor = client.scroll(
+                collection_name=collection, limit=step, offset=cursor,
+                with_payload=True, with_vectors=False)
+            if not batch:
+                return []                    # 目标页超出范围
+            remaining -= len(batch)
+            if remaining > 0 and cursor is None:
+                return []                    # 没有下一页游标了
         points, _next = client.scroll(
-            collection_name=collection, limit=max(1, int(limit)),
-            offset=max(0, int(offset)) or None, with_payload=True, with_vectors=False)
+            collection_name=collection, limit=limit, offset=cursor,
+            with_payload=True, with_vectors=False)
     except Exception as e:
         logger.warning(f"读取资料库失败: {e}")
         return out
-    kw = (keyword or "").strip()
     for p in points:
         e = _entry(p)
         if kw and kw not in e["text"]:

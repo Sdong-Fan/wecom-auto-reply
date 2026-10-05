@@ -800,6 +800,15 @@ class KbDialog:
         kw = self._kb_kw.get().strip()
         rows = kb_tools.list_entries(self.qdrant, self.collection,
                                      offset=page * size, limit=size, keyword=kw)
+        # ★ 翻过界时（点「下一页」越过最后一页）**不要显示空白页** ——
+        #   空白页看起来就像"翻页坏了"（店主反馈过"上一页下一页是假的"）。
+        #   停回上一页并明说。带关键词过滤时不回退：那一页空可能只是都被滤掉了。
+        over = False
+        if not rows and page > 0 and not kw:
+            page -= 1
+            over = True
+            rows = kb_tools.list_entries(self.qdrant, self.collection,
+                                         offset=page * size, limit=size)
         self._kb_page = page
         for i in self._kb_tree.get_children():
             self._kb_tree.delete(i)
@@ -817,7 +826,8 @@ class KbDialog:
         total = kb_tools.count(self.qdrant, self.collection)
         self._kb_info.config(
             text=f"共 {total} 条 | 第 {page + 1} 页显示 {len(rows)} 条"
-                 + ("（已按关键词过滤本页）" if kw else ""))
+                 + ("（已按关键词过滤本页）" if kw else "")
+                 + ("　← 已经是最后一页了" if over else ""))
 
     # ── 试问一句页 ────────────────────────────────────────────────────
 

@@ -769,49 +769,13 @@ class MainWindow:
         customer = item.get("customer_name") or "客户"
         question = item.get("customer_message") or ""
 
-        dialog = tk.Toplevel(self.root)
-        dialog.title(f"编辑回复 — {customer}")
-        dialog.geometry("480x280")
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        ttk.Label(dialog, text=f"客户: {customer}").pack(
-            padx=10, pady=(10, 5), anchor="w")
-        if question:
-            ttk.Label(dialog, text=f"客户问的是: {question[:60]}",
-                      foreground="#666").pack(padx=10, anchor="w")
-        if current.strip():
-            ttk.Label(dialog, text="AI 推荐回复（可修改后发送）:").pack(
-                padx=10, anchor="w")
-        else:
-            # 空框会让用户以为是坏了 —— 说明白"这题资料里没有"
-            ttk.Label(dialog,
-                      text="AI 没给草稿（这个问题在资料库里找不到依据）。\n"
-                           "自己写一句发出去，或者把它加进资料库（知识库 → 资料库 → 新增一条）。",
-                      foreground="#8a6d00", justify="left").pack(
-                padx=10, anchor="w")
-
-        text_box = tk.Text(dialog, height=6, width=54, wrap=tk.WORD)
-        text_box.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
-        text_box.insert("1.0", current)
-        text_box.focus_set()
-
-        result = {"text": None}
-
-        def on_confirm():
-            result["text"] = text_box.get("1.0", tk.END).strip()
-            dialog.destroy()
-
-        btn_frame = ttk.Frame(dialog)
-        btn_frame.pack(pady=10)
-        ttk.Button(btn_frame, text="发送", command=on_confirm).pack(
-            side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(
-            side=tk.LEFT, padx=5)
-
-        self.root.wait_window(dialog)
-        if result["text"] and self._on_pending_edit:
-            self._on_pending_edit(key, result["text"])
+        # 窗口本身在 gui/pending_edit.py 里 —— 抽出去才能测布局
+        # （踩过：按钮最后 pack + 尺寸硬编码不缩放 → 高 DPI 下按钮被挤成 1px，
+        #   店主反馈"编辑的框太小、下面两个按钮被吞了"）
+        from gui.pending_edit import open_editor
+        edited = open_editor(self.root, customer, question, current).wait()
+        if edited and self._on_pending_edit:
+            self._on_pending_edit(key, edited)
 
     def _pending_item_for(self, key: str) -> dict:
         """把 key 那一行的客户名/问题取回来（编辑窗要显示"客户问的是…"）。"""

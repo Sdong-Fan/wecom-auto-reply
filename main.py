@@ -356,6 +356,11 @@ def _main_impl():
                 root.after(0, lambda m=msg: window.set_banner(m, level="error"))
                 return False
             sent = False
+            # ★ 发送前先记下"当前有哪些读得出字的未回复灰泡"。
+            #   校验靠的是**前后对比**：客户连发几条时，回完第一条以后
+            #   后面那条本来就没回复，只看"现在还有没有未回复灰泡"会误判成
+            #   没发出去 → 重发 → 客户收到两遍（2026-10-05 实测）。
+            before_unreplied = _unreplied_texts(scanner, detector, conf_bubble)
             for attempt in (1, 2):
                 scanner._switch_to_wecom_and_back(
                     lambda: scanner.send_message_via_keyboard(reply_text))
@@ -382,7 +387,8 @@ def _main_impl():
 
         实现放在模块级 ``_verify_screenshot_sent`` 里 —— 闭包里没法测。
         """
-        return _verify_screenshot_sent(scanner, detector, conf_bubble)
+        return _verify_screenshot_sent(scanner, detector, conf_bubble,
+                                       before=before_unreplied)
 
     def _process_send_queue_tick():
         """Process ONE send queue item per tick to avoid blocking GUI.
@@ -1523,35 +1529,52 @@ def greet_first_contact(customer_name: str, cfg: dict, send_fn,
     return True
 
 
-def _verify_screenshot_sent(scanner, detector, min_conf: float = 0.5) -> bool:
+def _unreplied_texts(scanner, detector, min_conf: float = 0.5):
+    """当前聊天区里"**读得出字的未回复灰泡**"文字集合；拿不到图返回 ``None``。
+
+    读不出字的（图片/语音）不算 —— 它们本来就不能当"没发出去"的证据。
+    """
+    img = scanner.capture_chat_area()
+    if img is None:
+        return None
+    unreplied, _has_blue, _replied = detector.extract_bubbles_detail(img)
+    if not unreplied:
+        return set()
+    return {t for t in (detector.extract_text(b, min_conf=min_conf).strip()
+                        for b, _ in unreplied) if t}
+
+
+def _verify_screenshot_sent(scanner, detector, min_conf: float = 0.5,
+                            before=None) -> bool:
     """截图模式：发完顺带看一眼聊天区，确认这条真的出去了。
 
     "点输入框→粘贴→回车"这条路上**没有任何回执** —— 剪贴板没设上、
     回车没生效、焦点跑了，代码都不知道，照样当成功。客户那边就是干等，
     而日志里写着"[发送]"、看不出异常。（API 模式有接口返回值，所以那边不用这个。）
 
-    判据用**气泡颜色**而不是 OCR 文字：我们刚发的是蓝泡，正常情况下客户那条
-    灰泡就变成"已回复"了。所以
+    ★ 判据必须是**发送前后对比**，不能只看"现在还有没有未回复灰泡"。
+    起因（2026-10-05 实测）：客户连着发了好几条，机器人回了第一条之后，
+    后面那条灰泡**本来就没回复**：
+        未回复 = ['你去过厦门吗', '你今天心情怎么样？']
+    旧判据看到"还有未回复灰泡"就判成"没发出去"→ 重发 → **客户收到两遍**
+    （日志里连续两条「第 1/2 次发出后聊天区里没看到这条回复」）。
 
-    * 没有未回复灰泡 → 发出去了
-    * 还有读得出字的未回复灰泡 → 大概率没发出去
-
-    颜色是像素级的，不会因为 OCR 认错字而误判成"没发出去"（那会导致重复发）。
-    读不到聊天区、或读不出字时一律**当成功**：宁可不重发，也不能给客户发两遍。
+    新判据：
+      * 拿不到图 / 读不出字 → 当成功（宁可漏一次确认，也不能给客户发两遍）
+      * 未回复气泡清空了 → 成功
+      * 和发送前**一模一样**（一个字都没变）→ 大概率粘贴/回车没生效 → 允许重试
+      * 变少了、或冒出了发送前没有的新消息 → 成功（别拿新消息当"我没发出去"）
     """
     try:
         time.sleep(0.4)                         # 等气泡渲染出来
-        img = scanner.capture_chat_area()
-        if img is None:
+        after = _unreplied_texts(scanner, detector, min_conf)
+        if after is None:
             return True
-        unreplied, _has_blue, _replied = detector.extract_bubbles_detail(img)
-        if not unreplied:
+        if not after:
             return True
-        texts = [detector.extract_text(b, min_conf=min_conf).strip()
-                 for b, _ in unreplied]
-        if not [t for t in texts if t]:
-            return True                         # 读不出内容，判不准 → 不重发
-        return False
+        if before and after == before:
+            return False
+        return True
     except Exception as e:
         log.debug(f"发送确认异常（当成功处理）: {e}")
         return True

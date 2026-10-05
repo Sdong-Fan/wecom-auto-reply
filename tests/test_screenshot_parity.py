@@ -91,13 +91,18 @@ def test_send_verifies_then_retries_once():
     assert "两次都没确认发出" in s
 
 
-def test_verify_uses_bubble_color_not_ocr_text():
-    """判据是气泡颜色（像素级），不是 OCR 文字 —— OCR 认错字会导致重复发。"""
+def test_verify_compares_before_and_after():
+    """判据是**发送前后对比**，不是"现在还有没有未回复灰泡"。
+
+    只看"还有未回复灰泡"会误判：客户连发几条时，回完第一条以后后面那条本来
+    就没回复 → 判成"没发出去"→ 重发 → 客户收到两遍（2026-10-05 实测）。
+    """
     import inspect
     import main as main_mod
     src = inspect.getsource(main_mod._verify_screenshot_sent)
-    assert "extract_bubbles_detail" in src
-    assert "没有未回复灰泡" in src
+    helper = inspect.getsource(main_mod._unreplied_texts)
+    assert "extract_bubbles_detail" in helper      # 判据仍然基于气泡检测
+    assert "after == before" in src
 
 
 def test_verify_defaults_to_success_when_unreadable():
@@ -116,7 +121,7 @@ def test_verify_defaults_to_success_when_unreadable():
 
 
 def test_verify_detects_unanswered_bubble():
-    """没发出去：客户那条灰泡还挂着未回复 → 判定失败，触发重试。"""
+    """没发出去：客户那条灰泡**和发送前一模一样** → 判定失败，触发重试。"""
     from PIL import Image
     import main as main_mod
 
@@ -131,7 +136,53 @@ def test_verify_detects_unanswered_bubble():
         def extract_text(self, b, min_conf=None):
             return "客户的问题还在"
 
-    assert main_mod._verify_screenshot_sent(_Scanner(), _Det()) is False
+    before = {"客户的问题还在"}
+    assert main_mod._verify_screenshot_sent(_Scanner(), _Det(), before=before) is False
+
+
+def test_verify_does_not_resend_when_new_message_arrived():
+    """★ 真实故障回归（2026-10-05）：客户连发多条时不能判成"没发出去"。
+
+    现场：客户先发「你去过厦门吗」、再发「你今天心情怎么样？」，机器人回了第一条。
+    发送后聊天区里"未回复"= 两条（后面那条本来就还没回），旧判据看到
+    "还有读得出字的未回复灰泡"就判失败 → 重发 → **客户收到两遍**
+    「帮您问下今天的心情状况，稍等～」。
+    """
+    from PIL import Image
+    import main as main_mod
+
+    class _Scanner:
+        def capture_chat_area(self):
+            return Image.new("RGB", (400, 600), (255, 255, 255))
+
+    class _Det:
+        def extract_bubbles_detail(self, img):
+            return [(Image.new("RGB", (10, 10)), None)], False, []
+
+        def extract_text(self, b, min_conf=None):
+            return "你今天心情怎么样？"          # 冒出了发送前没有的新消息
+
+    before = {"你去过厦门吗"}
+    assert main_mod._verify_screenshot_sent(_Scanner(), _Det(), before=before) is True
+
+
+def test_verify_no_before_snapshot_never_resends():
+    """没拿到发送前的快照 → 无法判断，一律当成功（宁可漏确认，不可发两遍）。"""
+    from PIL import Image
+    import main as main_mod
+
+    class _Scanner:
+        def capture_chat_area(self):
+            return Image.new("RGB", (400, 600), (255, 255, 255))
+
+    class _Det:
+        def extract_bubbles_detail(self, img):
+            return [(Image.new("RGB", (10, 10)), None)], False, []
+
+        def extract_text(self, b, min_conf=None):
+            return "客户的问题还在"
+
+    assert main_mod._verify_screenshot_sent(_Scanner(), _Det(), before=None) is True
 
 
 def test_verify_success_when_nothing_unreplied():

@@ -94,10 +94,20 @@ def test_scan_fallback_second_call_has_no_new_messages():
 
 
 def test_main_passes_dependencies_at_call_site():
+    """调用点必须把 `_scan_fallback` 用到的**每个**内部变量都传进去。
+
+    ★ 2026-10-05 扩：原来只查 whitelist/new_tracker/only_new_messages，
+    漏了 send_queue/pending_queue —— 而那两个名字正好在"气泡在但读不出字"
+    （图片/语音/文件）那条**很少走到的**分支里用，于是潜伏成 NameError：
+    扫描一碰到图片/语音/文件就崩，客户发什么机器人都没反应。
+    """
     from pathlib import Path
     src = (Path(__file__).resolve().parent.parent / "main.py").read_text(encoding="utf-8")
     assert "whitelist=whitelist," in src
     assert "new_tracker=new_tracker," in src
-    assert "only_new_messages=only_new_messages))" in src
+    assert "only_new_messages=only_new_messages," in src
+    assert "send_queue=send_queue," in src, "漏传 send_queue → 扫到图片/语音就 NameError"
+    # 末位参数后面没有逗号（实际是 `pending_queue=pending_queue))`），别把逗号写进断言
+    assert "pending_queue=pending_queue" in src, "漏传 pending_queue 同上"
     assert "found, fb_text, fb_name, fb_bubbles" in src, \
         "兜底返回的 4 元组要接住（第 4 项是气泡文本，用于逐条记已见）"

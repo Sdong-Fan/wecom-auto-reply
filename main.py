@@ -1114,7 +1114,9 @@ def _main_impl():
                     _scan_fallback(scanner, detector, cfg,
                                    whitelist=whitelist,
                                    new_tracker=new_tracker,
-                                   only_new_messages=only_new_messages))
+                                   only_new_messages=only_new_messages,
+                                   send_queue=send_queue,
+                                   pending_queue=pending_queue))
                 fb_cust = (fb_name or customer_name)
                 # Use customer_name for dedup (main path's cleaned name),
                 # not fb_name which may differ due to OCR at different Y.
@@ -1189,12 +1191,17 @@ def _main_impl():
 
 async def _scan_fallback(scanner: Scanner, detector: MessageDetector,
                          cfg: dict, whitelist=None, new_tracker=None,
-                         only_new_messages: bool = False):
+                         only_new_messages: bool = False,
+                         send_queue=None, pending_queue=None):
     """兜底扫描：扫 col2 前 N 个条目找客户对话。
 
-    ``whitelist`` / ``new_tracker`` / ``only_new_messages`` 由调用方（``_main_impl``）
-    传进来 —— 这个函数是**模块级**的，看不到 ``_main_impl`` 的局部变量。
-    （踩过：直接在函数体里用那几个名字 → 每轮扫描都 NameError，表现成"点了开始没反应"。）
+    ``whitelist`` / ``new_tracker`` / ``only_new_messages`` / ``send_queue`` /
+    ``pending_queue`` 全部由调用方（``_main_impl``）传进来 —— 这个函数是**模块级**的，
+    看不到 ``_main_impl`` 的局部变量。
+    （踩过两次：第一次漏传 whitelist/new_tracker/only_new_messages → 每轮扫描都
+      NameError，表现成"点了开始没反应"；第二次漏传 send_queue/pending_queue →
+      只在"气泡在但一个字都读不出来"（图片/语音/文件）那条**很少走到的**分支上崩，
+      所以潜伏更久 —— 2026-10-05 修好扫描窗口、那条分支被激活后才暴露。）
     """
     if new_tracker is None:
         new_tracker = NewMessageTracker(enabled=only_new_messages)
@@ -1385,8 +1392,13 @@ async def _scan_fallback(scanner: Scanner, detector: MessageDetector,
         bubble_texts = [t for t in bubble_texts if t]
         if not bubble_texts:
             # 气泡在、一个字都读不出来 → 图片/语音/文件（以前写"OCR空"就跳过了）
-            _screenshot_nontext(send_queue, pending_queue, cust_key,
-                                len(unreplied))
+            # 队列可能是 None（测试/被别处调用）—— 那就只记日志，别在这里崩。
+            if send_queue is not None and pending_queue is not None:
+                _screenshot_nontext(send_queue, pending_queue, cust_key,
+                                    len(unreplied))
+            else:
+                log.warning("读不出文字的气泡 %d 个，但队列没传进来，跳过应答: %r",
+                            len(unreplied), cust_key)
             _settle(i, this_key, this_fp)
             detector.mark_clicked(y, fingerprint=this_fp, timeout=30)
             continue

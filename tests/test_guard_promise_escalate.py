@@ -104,16 +104,45 @@ def test_meaningful_message_still_replied(text):
     assert should_reply(text)[0] is True, text
 
 
-# ── 4. 分类默认值：拿不准当业务，不许私下当闲聊 ────────────────────────
-
+# ── 4. 判不准的消息：**绝不能被闲聊通道接走** ──────────────────────────
+#
+# ★ 2026-10-05 契约变更：分类默认值从 business 改回 smalltalk
+#   （店主决定："回到'没有业务词就闲聊'"）。所以判据不再是"分类必须是 business"，
+#   而是**更本质的那条**：这些"判不准、可能是业务"的消息，要么分类就是 business，
+#   要么被 `must_escalate` 的硬红线拦住 —— 反正不许进闲聊通道（闲聊会直接发给客户）。
+#
+#   当年正是因为「支持分期吗」「就它了」这类消息被闲聊接走、发出越权承诺，
+#   才把默认值收紧成 business。现在放宽了，就必须靠"业务词 + 硬红线"接住它们。
 @pytest.mark.parametrize("text", [
     "支持分期吗", "有会员卡吗", "可以以旧换新吗", "能跨店取还吗",
     "我订单到哪了", "今天下午能送到厦门吗", "就它了", "刚才说的那个还有吗",
     "我朋友说你们这边机器挺全的你觉得我该选哪个",
 ])
-def test_unknown_text_is_business(text):
-    """判不准 → business（宁可答得拘谨）。判成闲聊就会用店员口吻把转人工的话发出去。"""
-    assert classify_message(text) == "business", text
+def test_unknown_text_never_goes_to_smalltalk(text):
+    from rag.guard import escalate_tier
+    kind = classify_message(text)
+    why = must_escalate(text)
+    guarded = kind == "business" or (why and escalate_tier(why) == "hard")
+    assert guarded, ("%r 会被闲聊通道接走（分类=%s，规则=%r）" % (text, kind, why))
+
+
+@pytest.mark.parametrize("text,why", [
+    ("支持分期吗", "业务词「分期」"),
+    ("就它了", "4 字以内看不懂的短句"),
+    ("我要投诉", "硬红线：投诉纠纷"),
+    ("抹个零头吧", "硬红线：议价特批"),
+])
+def test_incident_messages_are_not_smalltalk(text, why):
+    """当年出过事故的那几条：放宽默认值之后仍然不许进闲聊通道。
+
+    「就它了」→「好嘞 那这台给你留着哈」（凭空承诺）
+    「支持分期吗」→「这个我得问下店里哈，晚点回你～」（文字期货，没有工单）
+    「我要投诉」→「咋啦这是？先别急」（投诉没进队列）
+    """
+    from rag.guard import escalate_tier
+    guarded = (classify_message(text) == "business"
+               or (must_escalate(text) and escalate_tier(must_escalate(text)) == "hard"))
+    assert guarded, "%s（%s）会被闲聊接走" % (text, why)
 
 
 @pytest.mark.parametrize("text", [

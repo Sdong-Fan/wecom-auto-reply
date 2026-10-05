@@ -51,13 +51,23 @@ def test_responder_no_longer_emits_human_confirm():
 
 
 def test_escalation_carries_hold_text():
-    """转人工时要带上给客户的礼貌占位语，且优先用 LLM 生成带上文内容的。"""
+    """转人工时要带上给客户的礼貌占位语，且优先用 LLM 生成带上文内容的。
+
+    2026-10-05：占位语支持**携带资料片段**（资料里有通用政策就引用一句），
+    所以调用形式从 `_make_hold_reply(text)` 变成带参数 —— 断言按意图改，
+    并额外钉住"检索前/检索后两条路都要传对参数"。
+    """
     source = Path("rag/responder.py").read_text(encoding="utf-8")
-    n = source.count("hold_text=await self._make_hold_reply(text)")
+    n = source.count("hold_text=await self._make_hold_reply(text")
     assert n >= 5, f"每条转人工路径都应带上 hold_text（实际 {n} 条）"
     assert "generate_hold_reply" in source, \
         "应优先用 LLM 生成带客户问题内容的占位语"
     assert "HOLD_REPLIES" in source, "缺少生成失败时的固定话术兜底"
+    # 检索**之前**就转人工的路（must_escalate 等）手里没有片段，要自己补捞
+    assert "retrieve=True" in source, "检索前的转人工路径应补捞政策片段"
+    # 检索**之后**转人工的路手上就有片段，直接带上（含检索分用于判断资料里有没有）
+    assert "chunks=chunks, top_score=top_score" in source, \
+        "检索后的转人工路径应把片段与检索分传给占位语"
 
 
 def test_hold_reply_has_fallback_and_validation():

@@ -26,7 +26,8 @@ from rag.generator import generate_reply, generate_hold_reply
 from rag.guard import (classify_and_dispatch, check_retrieval, high_threshold,
                        UNCERTAINTY_KEYWORDS, GENERIC_REPLY_PATTERNS,
                        HEDGE_PHRASES, out_of_scope, must_escalate,
-                       unsafe_promise, deferral_phrase, decision_path_of)
+                       unsafe_promise, deferral_phrase, decision_path_of,
+                       LOW_RETRIEVAL_THRESHOLD)
 from rag.judge import should_reply, is_low_information
 from rag.jev_judge import judge_should_reply
 from rag.local_answers import answer_locally, now_line
@@ -167,19 +168,58 @@ class Responder:
         except Exception:
             pass
 
-    async def _make_hold_reply(self, question: str) -> str:
+    async def _policy_chunks(self, question: str) -> list:
+        """为占位语捞一次资料片段（**best-effort，失败就返回空**）。
+
+        为什么需要：`must_escalate`（订单查询/议价/投诉）在**检索之前**就返回了，
+        所以那条路上的占位语手里没有任何资料 —— 客户收到的只有"稍等"。
+        实测反馈：「我的订单什么时候发货」被判转人工是对的（评测集 C13B 同类），
+        但资料库里明明写着"24 小时发货"，客户却一个字都没听到。
+        """
+        try:
+            qv = await asyncio.to_thread(embed_query, question)
+            pts = await asyncio.to_thread(
+                search, qv, self.qdrant, active_collection(), 3)
+            if not pts:
+                return []
+            if pts[0].score < LOW_RETRIEVAL_THRESHOLD:
+                return []                      # 资料里没这条，别硬套
+            return [((p.payload or {}).get("text") or "")[:400] for p in pts
+                    if (p.payload or {}).get("text")]
+        except Exception as e:
+            logger.debug("占位语取资料失败（用通用占位语）: %s", e)
+            return []
+
+    async def _make_hold_reply(self, question: str, chunks: list = None,
+                               top_score: float = 0.0,
+                               retrieve: bool = False) -> str:
         """转人工时发给客户的占位语，带上客户问题的内容。
 
         让 LLM 说一句"帮您问下适合滑雪的机器"这类话，比固定话术更像真人。
-        生成失败（网络/超时）或措辞不合格时，退回 HOLD_REPLIES 里的固定话术。
+
+        ★ **资料里有的通用政策，可以借占位语说一句**（2026-10-05 实测反馈后加的）：
+        客户问「我的订单什么时候发货」，资料里写着"24 小时发货" —— 判定转人工是对的
+        （问的是他那一单，机器人看不到），但让客户只听到"稍等"就把已发布的政策浪费了。
+        所以把检索到的片段喂进去，允许它**引用片段里明说的政策**，
+        同时由提示词 + 承诺护栏**双重禁止**它推演到这一单（"您这单今天能到"）。
+
+        `retrieve=True`：调用方手里没有片段时（`must_escalate` 在检索前就返回了），
+        自己补捞一次（本地检索，不花 token，失败就退回通用占位语）。
+        有片段但检索分不够（`top_score < LOW_RETRIEVAL_THRESHOLD`）时一律不给 ——
+        资料里没这条政策，就别硬套。
         """
+        if retrieve and not chunks:
+            chunks = await self._policy_chunks(question)
+        elif chunks and top_score < LOW_RETRIEVAL_THRESHOLD:
+            chunks = None
         try:
             text = await asyncio.wait_for(
-                generate_hold_reply(question), timeout=8)
+                generate_hold_reply(question, chunks=chunks), timeout=8)
         except Exception as e:
             logger.warning(f"占位语生成失败，用固定话术: {e}")
             return random.choice(HOLD_REPLIES)
-        if _hold_ok(text):
+        # 占位语是**自动发出去**的：既要过原来的措辞护栏，也要过承诺护栏
+        if _hold_ok(text) and not unsafe_promise(text):
             return text
         logger.warning(f"占位语不合格，用固定话术: {text[:40]!r}")
         return random.choice(HOLD_REPLIES)
@@ -369,7 +409,7 @@ class Responder:
             notify_escalation(customer_name, text, reason=hard)
             return ReplyResult(
                 success=False, reason=hard, escalated=True,
-                hold_text=await self._make_hold_reply(text),
+                hold_text=await self._make_hold_reply(text, retrieve=True),
                 dispatch_level="human_handle",
                 guard_decision="must_escalate",
                 guard_reason=hard,
@@ -399,7 +439,7 @@ class Responder:
             notify_escalation(customer_name, text, reason="Embedding错误")
             return ReplyResult(
                 success=False, reason="Embedding错误", escalated=True,
-                hold_text=await self._make_hold_reply(text),
+                hold_text=await self._make_hold_reply(text, retrieve=True),
                 dispatch_level="human_handle",
             )
 
@@ -414,7 +454,7 @@ class Responder:
             notify_escalation(customer_name, text, reason="检索服务异常")
             return ReplyResult(
                 success=False, reason="检索服务异常", escalated=True,
-                hold_text=await self._make_hold_reply(text),
+                hold_text=await self._make_hold_reply(text, retrieve=True),
                 dispatch_level="human_handle",
             )
 
@@ -453,7 +493,7 @@ class Responder:
             notify_escalation(customer_name, text, reason=reason_str)
             return ReplyResult(
                 success=False, reason=reason_str, escalated=True,
-                hold_text=await self._make_hold_reply(text),
+                hold_text=await self._make_hold_reply(text, chunks=chunks, top_score=top_score),
                 dispatch_level="human_handle",
                 retrieval_score=top_score,
             )
@@ -470,7 +510,7 @@ class Responder:
             notify_escalation(customer_name, text, reason="LLM超时")
             return ReplyResult(
                 success=False, reason="LLM超时", escalated=True,
-                hold_text=await self._make_hold_reply(text),
+                hold_text=await self._make_hold_reply(text, chunks=chunks, top_score=top_score),
                 dispatch_level="human_handle",
                 retrieval_score=top_score,
             )
@@ -479,7 +519,7 @@ class Responder:
             notify_escalation(customer_name, text, reason="LLM错误")
             return ReplyResult(
                 success=False, reason="LLM错误", escalated=True,
-                hold_text=await self._make_hold_reply(text),
+                hold_text=await self._make_hold_reply(text, chunks=chunks, top_score=top_score),
                 dispatch_level="human_handle",
                 retrieval_score=top_score,
             )
@@ -505,7 +545,7 @@ class Responder:
             return ReplyResult(
                 success=False, reason=f"越权承诺（{promise}）", escalated=True,
                 reply_text=reply,
-                hold_text=await self._make_hold_reply(text),
+                hold_text=await self._make_hold_reply(text, chunks=chunks, top_score=top_score),
                 dispatch_level="human_handle",
                 guard_decision="unsafe_promise",
                 guard_reason=f"越权承诺（{promise}）",
@@ -524,7 +564,7 @@ class Responder:
             return ReplyResult(
                 success=False, reason="回复是拖延话术（应为转人工）", escalated=True,
                 reply_text=reply,
-                hold_text=await self._make_hold_reply(text),
+                hold_text=await self._make_hold_reply(text, chunks=chunks, top_score=top_score),
                 dispatch_level="human_handle",
                 guard_decision="deferral_phrase",
                 guard_reason=f"拖延话术（{defer}）",
@@ -581,7 +621,7 @@ class Responder:
                       else f"置信度不足({top_score:.2f})")
         notify_escalation(customer_name, text, reason=reason_str,
                           draft_reply=draft)
-        hold = await self._make_hold_reply(text)
+        hold = await self._make_hold_reply(text, chunks=chunks, top_score=top_score)
         logger.info(f"转人工: {reason_str} → 已回复客户: {hold}")
         return ReplyResult(
             success=False, reason=reason_str, escalated=True,

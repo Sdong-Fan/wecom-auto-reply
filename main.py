@@ -369,7 +369,7 @@ def _main_impl():
             for attempt in (1, 2):
                 scanner._switch_to_wecom_and_back(
                     lambda: scanner.send_message_via_keyboard(reply_text))
-                sent = _confirm_screenshot_sent()
+                sent = _confirm_screenshot_sent(before_unreplied)
                 if sent:
                     break
                 log.warning(f"[发送] 第 {attempt} 次发出后聊天区里没看到这条回复"
@@ -387,13 +387,19 @@ def _main_impl():
             log.error(f"[发送失败] {customer_name}: {e}")
             return False
 
-    def _confirm_screenshot_sent() -> bool:
+    def _confirm_screenshot_sent(before=None) -> bool:
         """截图模式：发完顺带看一眼聊天区，确认这条真的出去了。
 
         实现放在模块级 ``_verify_screenshot_sent`` 里 —— 闭包里没法测。
+
+        ★ ``before`` 必须**当参数传**，不能靠闭包抓：这个函数和 `_do_send`
+        是**兄弟**（都在 `_main_impl` 里），看不到对方的局部变量。
+        （2026-10-06 踩过：里面直接写 `before=before_unreplied` →
+          `NameError: name 'before_unreplied' is not defined` ——
+          每次发送都记一条"发送失败"，但客户其实收到了，日志在说谎。）
         """
         return _verify_screenshot_sent(scanner, detector, conf_bubble,
-                                       before=before_unreplied)
+                                       before=before)
 
     def _process_send_queue_tick():
         """Process ONE send queue item per tick to avoid blocking GUI.

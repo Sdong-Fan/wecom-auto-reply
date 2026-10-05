@@ -86,7 +86,8 @@ def test_already_seen_bubbles_are_not_treated_as_nontext():
 
 def test_send_verifies_then_retries_once():
     s = _main_src()
-    assert "_confirm_screenshot_sent()" in s
+    # 校验要带上"发送前的未回复快照" —— 否则客户连发多条时会误判成"没发出去"
+    assert "_confirm_screenshot_sent(before_unreplied)" in s
     assert "for attempt in (1, 2):" in s
     assert "两次都没确认发出" in s
 

@@ -1,19 +1,26 @@
 # tests/test_no_undefined_names.py
-"""静态检查：模块级函数里**不许用没定义的内部变量**。
+"""静态检查：函数里**不许用解析不到的名字**（含嵌套函数、跨兄弟作用域）。
 
-为什么要这个测试（踩过两次，第二次潜伏很久）：
-`_scan_fallback` 是**模块级函数**，看不到 `_main_impl` 的局部变量。
-写代码时顺手用了 `whitelist` / `send_queue` 这类名字 → 每次运行到那行就
-`NameError`，表现成"点了开始没反应"。第一次补了
-`whitelist/new_tracker/only_new_messages`，**漏了 `send_queue`/`pending_queue`**；
-因为那两个名字只在"气泡在但一个字都读不出来"（图片/语音/文件）的分支里用到，
-很少有人走到，所以一直没暴露 —— 直到 2026-10-05 修好扫描窗口、
-那条分支被激活，扫描线程才开始崩。
+为什么需要（同一个坑踩了三次）：
+`main.py` 里大量逻辑写成 `_main_impl` 内部的**嵌套函数**，它们共享 `_main_impl`
+的作用域，**兄弟之间看不到对方的局部变量**。踩过的：
 
-这类 bug 靠跑测试很难发现（要刚好走到那个分支），但**静态分析一眼就能看出来**。
-所以这里直接用 AST 扫一遍：模块级函数里凡是"既不是参数、也不是局部赋值、
-也不是模块级名字、也不是内置名"的变量引用，全部报出来。
+1. `_scan_fallback`（模块级）用了 `whitelist` / `send_queue` / `pending_queue`
+   却既不是参数、也没有外层作用域 → 每轮扫描 NameError；
+2. 同上，`send_queue`/`pending_queue` 潜伏更久 —— 只在"气泡在但读不出字"
+   （图片/语音/文件）那条少见分支上崩，修好扫描窗口后才被激活；
+3. `_confirm_screenshot_sent` 用了 `before_unreplied`，而那是它的**兄弟函数**
+   `_do_send` 的局部变量 → 每次发送都记一条"发送失败"，客户其实收到了，
+   日志在说谎。
+
+这类 bug 靠跑测试很难撞上（要刚好走到那条分支），但**静态分析一眼能看出来**。
+所以这里用 AST 带**作用域链**扫一遍：模块级名字 + 逐层外层函数的局部名 +
+自己这一层的局部名（参数 / 赋值 / 嵌套 def / 导入 / for·with·except 目标 /
+global·nonlocal）+ 内置名 —— 都解析不到就报出来。
+
+★ 第 3 次能发生，正是因为最初这版检查**只扫模块级函数**、没走嵌套作用域。
 """
+
 import ast
 import builtins
 from pathlib import Path
@@ -22,10 +29,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# 允许出现的"动态"名字：pytest 注入、以及确实由 globals/局部注入的名字
-ALLOW = {"__file__", "__name__", "__doc__", "self", "cls"}
-
 CHECK_FILES = ["main.py", "rag/responder.py", "wxbot/scanner.py"]
+ALLOW = {"__file__", "__name__", "__doc__", "self", "cls"}
 
 
 def _module_level_names(tree) -> set:
@@ -45,78 +50,111 @@ def _module_level_names(tree) -> set:
                 names |= {n.id for n in ast.walk(t) if isinstance(n, ast.Name)}
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             names.add(node.target.id)
-        elif isinstance(node, (ast.If, ast.Try)):      # 条件定义（如 TYPE_CHECKING）
-            for sub in node.body + getattr(node, "orelse", []):
+        elif isinstance(node, (ast.If, ast.Try)):
+            for sub in list(node.body) + list(getattr(node, "orelse", [])):
                 if isinstance(sub, (ast.Import, ast.ImportFrom, ast.Assign,
                                     ast.FunctionDef, ast.AsyncFunctionDef,
                                     ast.ClassDef)):
-                    names |= _module_level_names(ast.Module(body=[sub], type_ignores=[]))
+                    names |= _module_level_names(ast.Module(body=[sub],
+                                                            type_ignores=[]))
     return names
 
 
-def _undefined_in(fn, module_names: set) -> list:
-    """返回 [(行号, 名字)]：函数里引用了却解析不到的名字。"""
-    params = {a.arg for a in fn.args.args}
-    params |= {a.arg for a in fn.args.kwonlyargs}
-    if fn.args.vararg:
-        params.add(fn.args.vararg.arg)
-    if fn.args.kwarg:
-        params.add(fn.args.kwarg.arg)
+def _scope_nodes(fn):
+    """遍历函数体内**属于这一层**的节点 —— **不进入**嵌套函数/类的内部。"""
+    stack = list(fn.body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.Lambda, ast.ClassDef)):
+            continue                      # 嵌套作用域单独递归处理
+        stack.extend(ast.iter_child_nodes(node))
 
-    defined = set(params)
-    # 局部赋值 / 嵌套 def / for 目标 / with as / except as / 推导式变量
-    # ★ 也要算上**函数体内的延迟导入**（`from x import y` 写在函数里很常见，
-    #    main.py 大量这么用）—— 漏了它会产生一堆误报。
-    for n in ast.walk(fn):
+
+def _bindings(fn) -> set:
+    """这个函数**自己**绑定的名字（不含嵌套函数内部的绑定）。"""
+    names = {a.arg for a in fn.args.args} | {a.arg for a in fn.args.kwonlyargs}
+    if fn.args.vararg:
+        names.add(fn.args.vararg.arg)
+    if fn.args.kwarg:
+        names.add(fn.args.kwarg.arg)
+    for n in _scope_nodes(fn):
         if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
-            defined.add(n.id)
+            names.add(n.id)
         elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            defined.add(n.name)
-        elif isinstance(n, ast.arg):
-            defined.add(n.arg)
+            names.add(n.name)             # 嵌套函数名属于本层
         elif isinstance(n, ast.ExceptHandler) and n.name:
-            defined.add(n.name)
+            names.add(n.name)
         elif isinstance(n, (ast.Global, ast.Nonlocal)):
-            defined |= set(n.names)
+            names |= set(n.names)
         elif isinstance(n, ast.Import):
             for a in n.names:
-                defined.add((a.asname or a.name).split(".")[0])
+                names.add((a.asname or a.name).split(".")[0])
         elif isinstance(n, ast.ImportFrom):
             for a in n.names:
-                defined.add(a.asname or a.name)
+                names.add(a.asname or a.name)
+    return names
 
-    out = []
-    for n in ast.walk(fn):
-        if not (isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)):
-            continue
-        if n.id in defined or n.id in module_names or n.id in ALLOW:
-            continue
-        if hasattr(builtins, n.id):
-            continue
-        out.append((n.lineno, n.id))
-    return out
+
+def _resolves(name: str, scopes: list, module_names: set) -> bool:
+    if name in ALLOW or name in module_names or hasattr(builtins, name):
+        return True
+    return any(name in scope for scope in scopes)
+
+
+def _check_function(fn, enclosing: list, module_names: set,
+                    relpath: str, problems: list):
+    local = _bindings(fn)
+    scopes = enclosing + [local]
+    for n in _scope_nodes(fn):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+            if not _resolves(n.id, scopes, module_names):
+                problems.append("%s:%d 函数 %s() 用到解析不到的名字 %r"
+                                % (relpath, n.lineno, fn.name, n.id))
+    for n in _scope_nodes(fn):            # 递归进嵌套函数，当前作用域当它的外层
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _check_function(n, scopes, module_names, relpath, problems)
 
 
 @pytest.mark.parametrize("relpath", CHECK_FILES)
-def test_module_functions_have_no_undefined_names(relpath):
-    """模块级函数不许引用解析不到的名字 —— 就是上面那个 NameError 的成因。"""
-    path = ROOT / relpath
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+def test_functions_have_no_undefined_names(relpath):
+    """连嵌套函数一起查 —— 跨兄弟作用域取名是踩过三次的那类 bug。"""
+    tree = ast.parse((ROOT / relpath).read_text(encoding="utf-8"))
     module_names = _module_level_names(tree)
-
     problems = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for lineno, name in _undefined_in(node, module_names):
-                problems.append("%s:%d 函数 %s() 用到未定义的名字 %r"
-                                % (relpath, lineno, node.name, name))
-    assert not problems, "发现未定义的名字（会 NameError）:\n  " + "\n  ".join(problems)
+            _check_function(node, [], module_names, relpath, problems)
+    assert not problems, "发现解析不到的名字（会 NameError）:\n  " + "\n  ".join(problems)
+
+
+def test_checker_actually_walks_nested_functions():
+    """自检：这道检查必须能看见嵌套函数。
+
+    否则它会重演第一次的失误 —— 只扫模块级函数，
+    于是 `_confirm_screenshot_sent` 里那个 `before_unreplied` 就漏过去了。
+    """
+    src = (ROOT / "main.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    seen = []
+
+    def walk(node, path=""):
+        for n in ast.iter_child_nodes(node):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                seen.append(path + "/" + n.name)
+                walk(n, path + "/" + n.name)
+
+    walk(tree)
+    depth = [p for p in seen if p.count("/") >= 2]
+    assert depth, "main.py 里应当有嵌套函数（否则这道检查没意义）"
+    assert any("_confirm_screenshot_sent" in p for p in depth), seen
 
 
 def test_scan_fallback_receives_every_thing_it_uses():
     """`_scan_fallback` 必须**显式收到**它用到的所有内部变量。
 
-    这条钉住 2026-10-05 的崩溃：它用了 send_queue/pending_queue，
+    钉住 2026-10-05 的崩溃：它用了 send_queue/pending_queue，
     但这两个名字既不是参数、也没有外层作用域可捕获 → 扫到"图片/语音"就 NameError。
     """
     src = (ROOT / "main.py").read_text(encoding="utf-8")
@@ -127,6 +165,39 @@ def test_scan_fallback_receives_every_thing_it_uses():
     for needed in ("send_queue", "pending_queue", "whitelist", "new_tracker",
                    "only_new_messages"):
         assert needed in params, "`_scan_fallback` 少了参数 %r" % needed
-    # 调用点也要真的传进去（有参数但没传 = 默认 None = 那条路静默失效）
     assert "send_queue=send_queue" in src
     assert "pending_queue=pending_queue" in src
+
+
+def test_confirm_screenshot_sent_takes_before_as_argument():
+    """`before` 必须当**参数**传 —— 它和 `_do_send` 是兄弟，抓不到对方的局部变量。
+
+    钉住 2026-10-06 的崩溃：`before=before_unreplied` →
+    `NameError: name 'before_unreplied' is not defined` ——
+    每次发送都记一条"发送失败"，但客户其实收到了（日志在说谎）。
+    """
+    src = (ROOT / "main.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    def find(node):
+        for n in ast.iter_child_nodes(node):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if n.name == "_confirm_screenshot_sent":
+                    return n
+                got = find(n)
+                if got is not None:
+                    return got
+        return None
+
+    fn = find(tree)
+    assert fn is not None, "找不到 _confirm_screenshot_sent"
+    params = {a.arg for a in fn.args.args} | {a.arg for a in fn.args.kwonlyargs}
+    assert "before" in params, "`before` 必须当参数传，不能靠闭包抓"
+    # 查 AST 而不是查源码字符串：docstring 里会引用这个名字做说明，字符串会误判
+    loaded = {n.id for n in ast.walk(fn)
+              if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+    assert "before_unreplied" not in loaded, "函数体里不该直接引用 before_unreplied"
+    passed = [k for n in ast.walk(fn) if isinstance(n, ast.Call) for k in n.keywords]
+    assert any(k.arg == "before" and isinstance(k.value, ast.Name)
+               and k.value.id == "before" for k in passed), \
+        "必须把 before 透传给 _verify_screenshot_sent(before=before)"

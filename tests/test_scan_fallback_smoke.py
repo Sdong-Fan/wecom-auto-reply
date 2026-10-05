@@ -93,6 +93,67 @@ def test_scan_fallback_second_call_has_no_new_messages():
     assert not de.click_col2_row.called, "没有变化就绝不能点开会话"
 
 
+def test_scan_fallback_nontext_branch_uses_injected_queues(monkeypatch):
+    """★ 回归：气泡在、但一个字都读不出来（图片/语音/文件）→ 走 `_screenshot_nontext`。
+
+    这条路 2026-10-05 崩过：
+        NameError: name 'send_queue' is not defined
+        File "main.py", line 1388, in _scan_fallback
+    `_scan_fallback` 是模块级函数，用了 send_queue/pending_queue 却既没接参数、
+    又没有外层作用域 → 扫描线程一碰图片就死，**客户发什么都不回**。
+    以前扫描窗口看不到短会话的气泡，这条路走不到，所以潜伏了很久 ——
+    修好扫描窗口之后它才被激活。
+
+    这条测试把那一整段真跑一遍（真的走到 `_screenshot_nontext`），
+    光靠源码字符串断言不够：要验证"参数传进去了、"而且"真的用上了"。
+    """
+    c2 = Image.new("RGB", (362, 1738), (250, 250, 250))
+    sc = _fake_scanner(c2)
+    sc.confirm_opened.return_value = "ok"
+    de = _fake_detector()
+    de.is_customer_name.return_value = True
+    # 有未回复气泡，但 extract_text 读不出任何字 → 非文本
+    de.extract_bubbles_detail.return_value = (
+        [(Image.new("RGB", (10, 10)), None)], False, [])
+    de.extract_text.return_value = ""
+    de.unseen_texts.return_value = []
+
+    calls = []
+    monkeypatch.setattr(main_mod, "_screenshot_nontext",
+                        lambda sq, pq, name, n=1: calls.append((name, n)))
+
+    send_queue, pending_queue = object(), object()
+    asyncio.run(main_mod._scan_fallback(
+        sc, de, dict(CFG), whitelist=None, new_tracker=None,
+        only_new_messages=False,
+        send_queue=send_queue, pending_queue=pending_queue))
+
+    # 假对象下每一行都被判成客户，所以会逐行触发；关键是"这条路真的走到了、
+    # 而且没有 NameError"
+    assert calls, "非文本气泡应当触发 _screenshot_nontext（以前这里 NameError）"
+    assert all(name == "某某" for name, _n in calls)
+
+
+def test_scan_fallback_nontext_without_queues_does_not_crash(monkeypatch):
+    """没传队列（测试/别处调用）时只记日志，**不许在这里崩掉扫描线程**。"""
+    c2 = Image.new("RGB", (362, 1738), (250, 250, 250))
+    sc = _fake_scanner(c2)
+    sc.confirm_opened.return_value = "ok"
+    de = _fake_detector()
+    de.is_customer_name.return_value = True
+    de.extract_bubbles_detail.return_value = (
+        [(Image.new("RGB", (10, 10)), None)], False, [])
+    de.extract_text.return_value = ""
+
+    called = []
+    monkeypatch.setattr(main_mod, "_screenshot_nontext",
+                        lambda *a, **k: called.append(a))
+    asyncio.run(main_mod._scan_fallback(
+        sc, de, dict(CFG), whitelist=None, new_tracker=None,
+        only_new_messages=False))
+    assert not called, "队列没传进来就不该调用应答（也不该崩）"
+
+
 def test_main_passes_dependencies_at_call_site():
     """调用点必须把 `_scan_fallback` 用到的**每个**内部变量都传进去。
 

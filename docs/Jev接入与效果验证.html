@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jev 接入与效果验证 · 一次引入新模型的完整过程</title>
+<style>
+  :root { --green:#1b5e20; --gray:#666; --line:#e3e6e3; --amber:#8a6d00; }
+  * { box-sizing: border-box; }
+  body { font-family:"Microsoft YaHei","PingFang SC","Helvetica Neue",Arial,sans-serif;
+         max-width:860px; margin:0 auto; padding:28px 20px 60px; line-height:1.8;
+         color:#222; background:#fff; }
+  h1 { font-size:23px; margin:0 0 4px; }
+  .sub { color:var(--gray); font-size:14px; margin-bottom:20px; }
+  h2 { font-size:17px; color:var(--green); margin:28px 0 8px;
+       border-left:4px solid var(--green); padding-left:10px; }
+  ul { padding-left:22px; margin:6px 0; }
+  li { margin:5px 0; }
+  table { border-collapse:collapse; width:100%; margin:10px 0; font-size:14px; }
+  th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:#f6f8f6; font-weight:600; }
+  code { background:#f4f6f4; padding:1px 5px; border-radius:3px; font-size:13px; }
+  .box { background:#f6f8f6; border:1px solid var(--line); border-radius:6px;
+         padding:12px 16px; margin:14px 0; }
+  .warn { background:#fff8e6; border-color:#f0e0b0; }
+  .kpi { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
+  .kpi div { flex:1 1 170px; border:1px solid var(--line); border-radius:6px;
+             padding:10px 12px; background:#fafcfa; }
+  .kpi b { display:block; font-size:20px; color:var(--green); }
+  .kpi span { font-size:12px; color:var(--gray); }
+  .pending b { color:var(--amber); }
+  a { color:#1565c0; word-break:break-all; }
+  footer { margin-top:34px; padding-top:14px; border-top:1px solid var(--line);
+           color:var(--gray); font-size:13px; }
+  @media print { body { padding:0; } h2 { page-break-after:avoid; } .noprint { display:none; } }
+</style>
+</head>
+<body>
+
+<h1>Jev 接入与效果验证</h1>
+<p class="sub">一次「把新模型引入现有系统」的完整过程 ｜ 相机租赁客服机器人 ｜ 2026-10</p>
+
+<div class="box">
+  <b>一句话结论</b>：我评估了 Jev（TypeSafe 的决策模型），用自有评测集量了两个候选落点 ——
+  <b>否决了其中一个</b>，在另一个上量化出了真瓶颈（基线 72.7%），
+  并把方案<b>以「默认关闭、只有否决权、失败自动降级」的方式接进系统</b>，对照实验进行中。
+</div>
+
+<h2>1. Jev 是什么（为什么值得评估）</h2>
+<ul>
+  <li><b>它是判断模型，不是生成模型</b>：只回答<b>选择题 / 打分 / 是非</b>，返回概率，<b>不生成文字</b>。
+      这是它近期受关注的原因 —— 通用大模型做分类与路由又贵又不稳，专用判断模型在窄任务上更省更准。</li>
+  <li>接口：<code>POST https://jev.bocha.cn/v1/systemone</code>，模型 <code>bocha-jev-v1</code>，
+      一次请求可带全部题目（加题不加价），单次约 1000 输入 token、约 1 秒。</li>
+  <li>返回的是<b>概率</b>（<code>noul</code> = 命题为真的程度），可以直接当置信度与阈值用。</li>
+</ul>
+
+<h2>2. 我没有直接接 —— 先量两个候选落点</h2>
+
+<p>我的链路里有两个位置"看起来像判断问题"，我都用<b>自有评测集</b>量过，没有靠感觉选：</p>
+
+<div class="kpi">
+  <div><b>100%</b><span>落点①「该不该答」：规则层在 600 条标注上全对</span></div>
+  <div><b>72.7%</b><span>落点②「资料覆盖没覆盖」：现状用相似度当代理</span></div>
+  <div class="pending"><b>进行中</b><span>落点②的 Jev 对照实验</span></div>
+</div>
+
+<table>
+  <tr><th>落点</th><th>现状靠什么</th><th>实测</th><th>结论</th></tr>
+  <tr>
+    <td><b>① 该不该答</b></td>
+    <td>词表 + 正则</td>
+    <td>规则层 <b>600/600（100%）</b>；34 条"不该回"全是表情/符号/收尾语</td>
+    <td><b>否决</b>——低熵问题，正则已满分，判断模型不可能更好</td>
+  </tr>
+  <tr>
+    <td><b>② 资料覆盖没覆盖</b></td>
+    <td>检索相似度分数 &gt; 0.50</td>
+    <td>322 条干净标注上只有 <b>234/322（72.7%）</b>，<b>87 条假阳性</b></td>
+    <td><b>这才是该上的地方</b>：相似度 ≠ 可答性</td>
+  </tr>
+</table>
+
+<div class="box warn">
+  <b>落点②的具体表现</b>：这些消息和资料库语义高度相关、检索分很高，但资料里<b>没有那个事实</b>：
+  <code>现在店里有几台A7M4</code>（0.653，实时库存）、<code>A7M4 80一天行吗</code>（0.728，议价）、
+  <code>我的快递单号发我</code>（0.528，订单物流）、<code>你们发错货了</code>（0.542，售后纠纷）、
+  <code>支持分期吗</code>（0.532，未覆盖政策）。
+  <br>这是 RAG 最经典的失效模式：<b>相似度不等于可答性（similarity ≠ answerability）</b>。
+  它也解释了我的架构现象 —— <b>为什么护栏越加越多</b>：上游"能不能答"的判断是错的，
+  所有"不该答"只能堆到下游用词表兜。把判断模型放在这里，是<b>把兜底前置</b>。
+</div>
+
+<h2>3. 怎么测的（评测集与口径）</h2>
+<ul>
+  <li><b>数据来源是真实语料</b>：我先把自己接待过的 <b>77 条真实客户消息</b>做了分类（99% 集中在 7 类问题），
+      再按这个分布和资料库覆盖范围出题 —— 46 题关键路径「尺子」+ <b>3×200 条「体检」</b>（8 大类）。</li>
+  <li><b>322 条干净标注</b>用于覆盖维度：大类「高频直答（资料库有答案）」196 条 → 覆盖；
+      「资料缺口（应转人工）」126 条 → 未覆盖。</li>
+  <li>判分口径：<b>脚本只判"行为对不对"，内容对错我看原文</b> —— 不让脚本自己判内容质量。
+      标注是我做的、不是独立标注，所以只用于客观维度。</li>
+</ul>
+
+<h2>4. 接入设计（三条硬约束）</h2>
+<ol>
+  <li><b>默认关闭的三态开关</b>（<code>config.json → judge.engine</code>）：
+      <code>rules</code>（默认，线上现状，不联网）/ <code>shadow</code>（影子：规则决定行为，
+      同时问一次 Jev 只落日志取证，<b>零风险</b>）/ <code>jev</code>（灰度：Jev 决定）。</li>
+  <li><b>Jev 只有否决权，没有放行权</b>：它说"不必回"就拦下；说"要回"<b>仍然要过检索、护栏、阈值三关</b>
+      才能发出去。它永远不能凭一句话让回复发给客户 —— 判错方向不对称时，这是唯一安全的接法。</li>
+  <li><b>失败一律降级</b>：超时 / 报错 / 没配凭据 / 返回结构不对 → <b>自动退回规则层</b>。
+      判断模型不能成为接待的单点故障。</li>
+</ol>
+<ul>
+  <li><b>分级调用保护延迟</b>：只在规则层说"要回"时才问 Jev（规则说不用回的本就不生成），
+      避免把 1.5 秒的中位响应拉到 2.5 秒。</li>
+  <li><b>隐私默认最小</b>：只发客户当前这一句，不发历史；只有"判覆盖"那道题必须带上检索片段（否则模型只能靠世界知识猜）。</li>
+  <li><b>题目按业务语域重写</b>：官方的题集是社交场景的，照抄必错。我按客服语域写了 4 道
+      （该不该答 / 意图 / 是否只有店主能定 / 资料是否覆盖），instructions 一律英文（判断模型主训练语言）。</li>
+</ul>
+
+<h2>5. 结果</h2>
+<table>
+  <tr><th>指标</th><th>现状（相似度当代理）</th><th>Jev 判断</th></tr>
+  <tr><td>「资料覆盖没覆盖」判对</td><td><b>234/322（72.7%）</b></td>
+      <td class="pending"><b>对照实验进行中</b></td></tr>
+  <tr><td>假阳性（说覆盖、其实没覆盖）</td><td>87 条</td><td class="pending">—</td></tr>
+  <tr><td>假阴性（说没覆盖、其实覆盖 → 该答没答）</td><td>1 条</td><td class="pending">—</td></tr>
+</table>
+<p style="font-size:13px;color:#666">
+  落点①的对照已完成并给出结论（规则层 100%，否决该方案）。落点②的 Jev 对照需要凭据，
+  命令已就绪：<code>python scripts/jev_shadow.py --dimension coverage</code>。
+</p>
+
+<h2>6. 为什么现在暂不实装</h2>
+<ol>
+  <li><b>只有基线，还没有对照</b>：没有对照就不能说它更好。</li>
+  <li><b>题目没经过校准</b>：还没按判断模型的脚手架做标注集校准（命中率 / 打分误差）。</li>
+  <li><b>隐私口径要业务方确认</b>：接它意味着每条客户消息发到固定的第三方端点，
+      和我"对话不出本机、只发给店主自己配的接口"的口径冲突。</li>
+  <li><b>判错方向不对称</b>：判"覆盖"其实没覆盖 → 会拿错资料答，不可逆。所以要先在影子模式攒够证据。</li>
+  <li><b>阈值不会消失</b>：它给的是概率，还是要定"概率 &gt; 多少才覆盖"，只是换了对象。</li>
+  <li><b>它不是当前最紧的事</b>：600 条里那 30 条"该答没答"有三处根因，判断层只能解决其中一部分。</li>
+</ol>
+
+<div class="box">
+  <b>推进顺序（先证明它更好，再让它碰客户）</b>：<br>
+  影子模式取证 → 用 322 条标注集证明打过 72.7% → 只在自己号上灰度 →
+  同一套尺子（46 题 + 3×200 条）复核不退化 → 才谈上线。
+  <br>验收线：判断命中率 <b>≥ 70%</b>，且<b>危险直发仍为 0</b>。
+</div>
+
+<h2>7. 证据在哪</h2>
+<table>
+  <tr><th>文件</th><th>内容</th></tr>
+  <tr><td><code>rag/jev_client.py</code></td><td>Jev 客户端：5 家托管预设、官方协议、key 脱敏、限流退避、超时降级；只用标准库，不引新依赖</td></tr>
+  <tr><td><code>rag/jev_judge.py</code></td><td>三态引擎 + 4 道业务语域题目 + 只有否决权 + 失败退回规则层 + 影子证据落盘</td></tr>
+  <tr><td><code>scripts/jev_shadow.py</code></td><td>离线对比脚本（两个维度），含 <code>--ping</code> 连通性自检</td></tr>
+  <tr><td><code>tests/test_jev_gray.py</code></td><td>19 个用例：默认行为不变、只有否决权、四种降级路径、影子不改行为、题目英文、隐私默认</td></tr>
+  <tr><td><code>docs/Jev对比-资料覆盖基线.md</code></td><td>基线报告（脚本生成）</td></tr>
+  <tr><td><code>docs/Jev灰度版-设计与取舍.md</code></td><td>设计、实测、好处、风险、为什么不实装的完整说明</td></tr>
+</table>
+<p style="font-size:13px;color:#666">
+  全量自动化测试 <b>1446 passed</b>（其中 19 个专测这个判断层），默认引擎为 <code>rules</code>，
+  <b>线上行为零变化</b>。
+</p>
+
+<footer>
+  可复现：<code>python scripts/jev_shadow.py --dimension coverage --dry-run</code>（不联网量基线）<br>
+  <span class="noprint">浏览器 <b>Ctrl+P → 另存为 PDF</b>，可直接发给面试官。</span>
+</footer>
+
+</body>
+</html>

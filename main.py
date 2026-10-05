@@ -19,7 +19,12 @@ from pathlib import Path
 
 # ═══ 日志配置必须在所有 import 之前，否则 basicConfig 会被忽略 ═══
 os.makedirs("logs", exist_ok=True)
-LOG_PATH = os.path.abspath("logs/monitor.log")
+# ★ 日志路径可用环境变量覆盖（`WECOM_LOG_PATH`）。
+#   为什么要这个：测试导入 main 时会连带建立日志处理器 → **测试输出直接写进了
+#   真实的 logs/monitor.log**（签名校验失败、发送失败重试、非文本应答…），
+#   把生产日志污染成一锅粥 —— 排查线上现场时会把测试输出当成真实现象
+#   （2026-10-05 就被误导过一次）。tests/conftest.py 现在把它指到临时目录。
+LOG_PATH = os.path.abspath(os.environ.get("WECOM_LOG_PATH", "logs/monitor.log"))
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",

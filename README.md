@@ -10,7 +10,7 @@
 
 ![python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![platform](https://img.shields.io/badge/Platform-Windows-0078d4)
-![tests](https://img.shields.io/badge/tests-1444-brightgreen)
+![tests](https://img.shields.io/badge/tests-1450-brightgreen)
 ![license](https://img.shields.io/badge/License-MIT-green)
 
 > ⚠️ **使用前请读**：[合规与免责](#合规与免责)。自动操作第三方客户端可能违反平台规则，
@@ -194,10 +194,10 @@ python scripts/privacy_check.py --path .               # 检查仓库
 ## 测试与评测
 
 ```bash
-SKIP_EMBED_TESTS=1 python -m pytest tests/ -q     # 1440 passed, 4 skipped（本机全绿）
+SKIP_EMBED_TESTS=1 python -m pytest tests/ -q     # 1446 passed, 4 skipped（本机全绿）
 ```
 
-* **1444 个测试**：含"发错人""内部信号外泄""重启后重复回复""编造型号""越权承诺"等事故的回归测试。
+* **1450 个测试**：含"发错人""内部信号外泄""重启后重复回复""编造型号""越权承诺"等事故的回归测试。
 * **46 题评测集**（`scripts/eval_set.py`，含 9 道"应转人工 / 不该回"的陷阱题（escalate 7 + no_reply 2））：
 
 | 版本 | 行为符合期望 | 危险直发（该转人工却发了） |
@@ -244,7 +244,7 @@ profiles/               窗口标定（企业微信 / 微信 PC）
 examples/kb_demo/       虚构示例资料（相机租赁）
 scripts/                评测、阈值扫描、打包、隐私自检、标定、诊断
 docs/                   设计文档、事故复盘、打包与隐私检查
-tests/                  1444 个测试
+tests/                  1450 个测试
 ```
 
 ---
@@ -312,7 +312,7 @@ tests/                  1444 个测试
 | 去重与漏答 | 两本账：'已经有人回过' 记 24h、'待回复' 只用 10 分钟短窗口（漏答比重复回严重）；"人工回过也算回过" | `wxbot/detector/_message_detector.py` |
 | 知识库能力 | 多资料库档案、资料库增删改与撤销、Excel/Word 上传、提示词界面可编辑 | `rag/archives.py`、`gui/kb_edit.py`、`pipeline/upload.py` |
 | 交付与隐私 | 打包隐私门禁（凭据/客户数据/exe 字节串自检，不通过即中止）、免安装分包、使用说明 | `scripts/privacy_check.py`、`scripts/build.py` |
-| 工程保障 | 测试从 ~248 增至 **1444 个**；4 次真实事故的根因修复与回归测试 | `tests/`、`docs/事故-*.md` |
+| 工程保障 | 测试从 ~248 增至 **1450 个**；4 次真实事故的根因修复与回归测试 | `tests/`、`docs/事故-*.md` |
 
 **为什么如实写明来源**：MIT 许可证要求保留原始版权声明；而且如实说明来源，
 比含糊其辞更能体现"能读懂既有代码、定位真正的风险点、并用数据证明改动有效"。

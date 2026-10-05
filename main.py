@@ -495,7 +495,16 @@ def _main_impl():
         """在 Tk 线程里弹出勾选窗。"""
         if not proposal.get("ok"):
             reason = proposal.get("skipped") or ""
-            if reason and reason not in ("没改动，不学", "学习已关闭"):
+            if reason == "学习已关闭":
+                # ★ 2026-10-06：这种情况原来**一声不吭**（被下面的条件故意排除了）。
+                #   店主的真实经历：在待人工页改完稿发出去，以为知识库会自动更新，
+                #   结果「学到的」里什么都没有、界面也没任何提示 —— 只能怀疑是 bug。
+                #   学习关着是有意设计（防口误入库），但**必须说出来**。
+                window.set_banner(
+                    "这条改稿没被学进去：**学习功能关着**，所以没进「学到的」。"
+                    "想让它学会 → 知识库 → 学到的 → 勾上「自动学习」。",
+                    level="warn")
+            elif reason and reason != "没改动，不学":
                 window.set_banner(f"这次改动没学到东西：{reason}", level="warn")
             log.info(f"不学习：{reason}")
             _learn_state["busy"] = False

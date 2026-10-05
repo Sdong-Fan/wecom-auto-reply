@@ -9,9 +9,9 @@
     "keep_uploaded_copy": true,
     "extract_confirm": "batch",
     "learn": {
-      "enabled": false,
+      "enabled": true,
       "max_items": 50,
-      "_comment": "从人工改稿学习：enabled=总开关，**出厂默认 false（关闭）**，要在「知识库→学到的」页勾上「自动学习」才开始学；max_items=每类最多留多少条（超出丢最旧）"
+      "_comment": "从人工改稿学习：enabled=总开关，**2026-10-06 起默认 true**（原先出厂 false）。在「知识库→学到的」页也有一个「自动学习」勾选框，可以随时关掉。学到的东西**不会自动进资料库** —— 先进「学到的」等你确认（防口误入库），点「采纳进资料库」才真正写进知识库。max_items=每类最多留多少条（超出丢最旧）"
     },
     "kb_first": {
       "enabled": true,

@@ -729,19 +729,34 @@ def _kb_dialog_src() -> str:
     return (root / "gui/kb_dialog.py").read_text(encoding="utf-8")
 
 
-def test_config_ships_with_learning_off():
+def test_config_ships_with_learning_on():
+    """★ 2026-10-06 策略变更：出厂**开启**学习。
+
+    原先出厂关闭的理由是"防口误入库"。但这条闭环本身已经有一道人工确认
+    （学到的东西先进「学到的」，点「采纳进资料库」才真正写进知识库），
+    而关着的代价是：店主在待人工页改完稿发出去，以为知识库会自动更新，
+    结果什么都没有、界面也没提示（店主真实经历）。
+    所以默认改成开，并且**关着时必须提示** —— 见
+    tests/test_learn_switch.py::test_offer_learn_tells_the_user_when_learning_is_off。
+    """
     import json
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
     cfg = json.loads((root / "config.json").read_text(encoding="utf-8"))
-    assert cfg["kb"]["learn"]["enabled"] is False
+    assert cfg["kb"]["learn"]["enabled"] is True
     assert "默认" in cfg["kb"]["learn"]["_comment"], "配置注释要说清这是默认值"
 
 
-def test_kb_dialog_says_default_off():
+def test_kb_dialog_always_shows_switch_state():
+    """顶部要**一直显示**开关状态，不能只在切换时闪一下。
+
+    ★ 2026-10-06：这条原来叫 `test_kb_dialog_says_default_off`（断言界面写着
+    "出厂默认是关闭的"）。策略改成默认开启后，那句文案就是**错的**了 ——
+    说明"文案要跟默认值一致"这件事得有人看着。现在断言的是状态显示本身。
+    """
     s = _kb_dialog_src()
-    assert "出厂默认" in s
     assert "学习开关" in s, "顶部要一直显示开关状态，不能只在切换时闪一下"
+    assert "出厂默认是关闭的" not in s, "默认值已改成开启，这句文案过时了"
 
 
 def test_kb_dialog_toggle_updates_the_state_line():

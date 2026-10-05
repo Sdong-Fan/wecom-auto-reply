@@ -139,10 +139,10 @@ class KbDialog:
         self._learn_info = ttk.Label(top, text="", foreground=COLORS["ink_mute"])
         self._learn_info.pack(side=tk.LEFT, padx=10)
 
-        tip = ("**出厂默认是关闭的** —— 想让它开始学，先勾上左边那个框。\n"
-               "开起来之后只自动学「怎么说话」；人工回复里带出的**新说法**"
-               "（价格/时效/政策）一律要你确认才进资料库 —— "
-               "不然一次性的「这次给你免押」会变成通用政策。")
+        tip = ("**默认是开着的**（2026-10-06 起）—— 不想要就取消左边那个勾。\n"
+               "学到的**不会自动进资料库**：只自动学「怎么说话」；人工回复里带出的"
+               "**新说法**（价格/时效/政策）会先进上面的「待确认」，点「采纳进资料库」"
+               "才真正生效 —— 不然一次性的「这次给你免押」会变成通用政策。")
         ttk.Label(page, text=tip, foreground=COLORS["warning"],
                   wraplength=780, justify="left").pack(anchor="w", padx=12)
 
@@ -217,7 +217,7 @@ class KbDialog:
         c = ls.counts()
         on = ls.enabled(self.cfg)
         self._learn_info.config(
-            text=(f"学习开关：{'已开启' if on else '未开启（出厂默认是关的）'}"
+            text=(f"学习开关：{'已开启' if on else '未开启（默认是开的，被关掉了）'}"
                   f"｜语气规则 {c['rules']} 条｜口吻样本 {c['tones']} 条｜"
                   f"待确认 {c['pending_facts']} 条｜别学 {c['blocked']} 条｜"
                   f"采纳过 {c['accepts']} 个问题"),

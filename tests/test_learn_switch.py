@@ -67,3 +67,47 @@ def test_offer_learn_tells_the_user_when_learning_is_off():
     # 关着时要弹横幅，并且说清去哪儿打开
     assert "学习功能关着" in src
     assert "知识库 → 学到的" in src
+
+
+def test_set_learn_enabled_writes_config(tmp_path, monkeypatch):
+    """编辑窗里勾/取消开关要真的写进 config.json（重启也记得）。
+
+    用临时 config 打桩 —— **绝不能碰真实的 config.json**（那会把店主的学习
+    开关改掉，而他正是被这个开关静默关掉坑过一次的人）。
+    """
+    from config import settings_store as ss
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({"kb": {"learn": {"enabled": True}}}), encoding="utf-8")
+    monkeypatch.setattr(ss, "load_config",
+                        lambda path=None: json.loads(p.read_text(encoding="utf-8")))
+    monkeypatch.setattr(ss, "save_config",
+                        lambda cfg, path=None: p.write_text(json.dumps(cfg),
+                                                            encoding="utf-8"))
+
+    from gui.pending_edit import set_learn_enabled
+    set_learn_enabled(False)
+    assert json.loads(p.read_text(encoding="utf-8"))["kb"]["learn"]["enabled"] is False
+    set_learn_enabled(True)
+    assert json.loads(p.read_text(encoding="utf-8"))["kb"]["learn"]["enabled"] is True
+
+
+def test_set_learn_enabled_keeps_other_config(tmp_path, monkeypatch):
+    """只改这一个键，别把配置里其它东西冲掉（save_config 是整份覆盖写）。"""
+    from config import settings_store as ss
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({"kb": {"learn": {"enabled": True, "max_items": 33},
+                                    "history_versions": 5},
+                             "rag": {"high_confidence_threshold": 0.5}}),
+                 encoding="utf-8")
+    monkeypatch.setattr(ss, "load_config",
+                        lambda path=None: json.loads(p.read_text(encoding="utf-8")))
+    monkeypatch.setattr(ss, "save_config",
+                        lambda cfg, path=None: p.write_text(json.dumps(cfg),
+                                                            encoding="utf-8"))
+
+    from gui.pending_edit import set_learn_enabled
+    set_learn_enabled(False)
+    got = json.loads(p.read_text(encoding="utf-8"))
+    assert got["kb"]["learn"]["max_items"] == 33, "别把 max_items 冲掉"
+    assert got["kb"]["history_versions"] == 5
+    assert got["rag"]["high_confidence_threshold"] == 0.5

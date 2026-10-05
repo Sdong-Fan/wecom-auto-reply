@@ -90,6 +90,32 @@ def test_buttons_are_packed_before_the_text_box(root):
     ed.win.destroy()
 
 
+def test_learn_switch_sits_below_the_two_buttons(root):
+    """★ 店主要求：学习开关挪到「编辑」窗两个按钮**下面**。
+
+    开关摆在你"想让它学"的那一下旁边 —— 之前它只在「知识库 → 学到的」页，
+    店主在这个窗口改完稿发出去，以为知识库会自动更新，结果什么都没发生
+    （总开关关着，而且界面没提示）。
+
+    ★ 断言用 `winfo_y()`（真实屏幕纵坐标），不靠 pack 序号 ——
+    `side=BOTTOM` 是"先 pack 的贴最底"，序号和视觉上下**正好相反**，
+    用序号写会又对又难读。直接比位置，意图一眼看得懂。
+    """
+    ed = _editor(root)
+    ed.win.update()
+    assert ed._btn_frame.winfo_y() < ed._learn_box.winfo_y(), "开关要在两个按钮下面"
+    assert ed._learn_box.winfo_height() > 1, "开关没显示出来"
+    ed.win.destroy()
+
+
+def test_learn_switch_reflects_config(root):
+    """开关初始状态要跟 config.json 一致（不能不管配置默认显示成勾上）。"""
+    from gui.pending_edit import _learn_enabled
+    ed = _editor(root)
+    assert bool(ed._learn_on.get()) is bool(_learn_enabled())
+    ed.win.destroy()
+
+
 def test_confirm_returns_edited_text(root):
     ed = _editor(root, current="原始草稿")
     ed.text_box.delete("1.0", tk.END)

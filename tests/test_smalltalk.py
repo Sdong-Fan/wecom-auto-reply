@@ -120,7 +120,7 @@ def test_smalltalk_branch_is_in_low_score_zone():
     gen = src.index("# ── LLM Generation")
     early = src.index('if kind == "smalltalk" and top_score <= self._high_threshold')
     assert early < esc < gen, "闲聊兜底要排在 escalate 判定之前，LLM 生成之前"
-    assert src.index("classify_message(text)") < esc, "分类一次就够，别重复调"
+    assert src.index("classify_message_ex(text)") < esc, "分类一次就够，别重复调"
     assert "_smalltalk_ok(small)" in src, "闲聊回复也要过底线校验"
 
 

@@ -32,7 +32,8 @@ from rag.guard import (classify_and_dispatch, check_retrieval, high_threshold,
 from rag.judge import should_reply, is_low_information
 from rag.jev_judge import judge_should_reply
 from rag.local_answers import answer_locally, now_line
-from rag.smalltalk import classify_message
+from rag.smalltalk import classify_message, classify_message_ex
+from rag.intent_judge import judge_intent, intent_llm_settings
 from rag.generator import generate_smalltalk_reply
 from rag.human_fallback import ContextStore
 from wxbot.sender import MessageSender
@@ -497,7 +498,31 @@ class Responder:
         # ── Pre-generation retrieval check ─────────────────────────
 
         retrieval = check_retrieval(scores, config=self._config)
-        kind = classify_message(text)
+        kind, kind_confident = classify_message_ex(text)
+
+        # ★ 2026-10-05 店主提的目标流程：**资料库检索不到时，用 LLM 判业务还是闲聊**。
+        #   只在**正则判不准**时才问 —— 正则对明确的句子判得又快又准，
+        #   而一次 LLM 调用要几百毫秒到 2 秒、还花钱。
+        #   实测 600 条评测集真正落到这一段（正则判不准 + 检索分 < 0.50）的
+        #   只有 **4 条 = 1%**：正则判得准 375 / 检索答得了 40 / 硬红线 88 /
+        #   越界婉拒 59 / 低信息量 34。所以这是"给模糊地带加个仲裁者"，
+        #   不是"给每条消息加一次调用"。
+        #
+        #   为什么是**仲裁**而不是**替代**正则：实测 LLM 会把「你们老板是男的女的」
+        #   判成 smalltalk（它就是"问店员本人"的口吻），而这条是店主定的"转人工"；
+        #   正则里"男的女的"这个业务信号正好接住。用 LLM 全面替代正则会丢掉这类保护。
+        #
+        #   还要**检索没答上来**才问（`top_score <= 门槛`）：按店主的流程
+        #   "先检索，有资料就直接答" —— 分数够高时资料库会回答，判意图毫无意义，
+        #   那次调用是白花的（例如「支持哪些支付方式」0.849 就该直接答）。
+        if not kind_confident and top_score <= self._high_threshold:
+            intent_on, _intent_t = intent_llm_settings(self._config)
+            if intent_on:
+                verdict = await judge_intent(text)
+                if verdict:
+                    logger.info("正则判不准 → LLM 判意图: %r → %s（正则原判 %s）",
+                                text[:24], verdict, kind)
+                    kind = verdict
 
         # ★ 招呼/闲聊不该被"检索分不够"拖去转人工。
         #   现场：客户说「你好」「在吗」「想你的夜」，检索分 0.40~0.46（够不上

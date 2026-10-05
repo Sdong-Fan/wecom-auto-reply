@@ -138,36 +138,44 @@ _NEGATION_WORDS = ("不", "别", "没", "无", "拒", "取消")
 _BARE_GREETINGS = ("喂", "在", "有人", "在的", "来", "哈喽", "嗨")
 
 
-def classify_message(text: str) -> str:
-    """→ ``business`` / ``smalltalk`` / ``closing``。
+def classify_message_ex(text: str) -> tuple:
+    """→ ``(kind, confident)``。``confident=False`` = **正则判不准，该问 LLM**。
 
-    保守：拿不准一律 business。收尾语由 rag/judge.py 的 should_reply 先判掉，
-    这里再兜一次（免得调用方顺序写错）。
+    为什么要有这个：正则分类器对**明确的**句子判得准（有业务词 → 业务；
+    "在吗/哈哈" → 闲聊），真正弱的是**中间那段模糊地带** ——
+    店主反馈过的问题（「你去过厦门吗」「这台机器拍出来好看吗」「你周末干嘛去了」）
+    全都落在这里。所以让正则管清楚的、LLM 管模糊的：
+    `confident=False` 时调用方可以拿 LLM 再判一次，失败就退回这里的 kind。
+
+    哪些算"判得准"：命中业务词 / 店指代词 / 请求语气 / 收尾语 / 暖场寒暄 /
+    明确的闲聊词 / 4 字以内的短句。剩下的（既没业务词、也没闲聊词、
+    还超过 4 个字）就是模糊地带 —— 以前它靠一个写死的默认值挡着，
+    现在交给 LLM 判。
     """
     t = (text or "").strip()
     if not t:
-        return "business"
+        return "business", True
     low = t.lower()
     compact = _CLEAN.sub("", low)
 
     # 业务信号最优先
     if any(c in low or c in compact for c in _BUSINESS_CUES):
-        return "business"
+        return "business", True
     # 纯收尾语
     from rag.judge import should_reply
     if not should_reply(t)[0]:
-        return "closing"
+        return "closing", True
     # 指向店里、或者带着请求/咨询语气 → 当业务。
     # 这一条必须排在闲聊词**前面**："你们老板在吗"里有"在吗"，
     # 但问的是店里的事，不能被闲聊词截走。
     # 例外：明确的暖场寒暄（"你们辛苦了"）先放行 —— 它带"你们"但不是业务问题。
     if any(w in low for w in _WARM_CUES):
-        return "smalltalk"
+        return "smalltalk", True
     if any(w in low for w in _SHOP_WORDS) or any(w in low for w in _REQUEST_WORDS):
-        return "business"
+        return "business", True
     # 闲聊信号
     if any(c in low or c in compact for c in _SMALLTALK_CUES):
-        return "smalltalk"
+        return "smalltalk", True
     # 短句且没有业务词 —— 只有在明确是**招呼**时才当闲聊（"喂"、"在"）。
     # ★ 2026-09-29 收紧：这里原来默认 smalltalk，于是"就它了"被当寒暄问候，
     #   机器人回了"好嘞 那这台给你留着哈"——**凭空承诺**发给了客户。
@@ -176,28 +184,22 @@ def classify_message(text: str) -> str:
     #   自动回了句"哈哈那不等了"发出去 —— 猜错话比不回更糟。
     if len(compact) <= 4:
         if any(w in compact for w in _NEGATION_WORDS):
-            return "business"
+            return "business", True
         if any(w in compact for w in _BARE_GREETINGS):
-            return "smalltalk"
-        return "business"
-    # 走到这里 = 没有业务词、没指向店里、也不是请求语气。
-    #
-    # ★ 2026-10-05 店主决定：**这里改回 smalltalk**（原话："回到'没有业务词就闲聊'"）。
-    #
-    #   历史：2026-09-29 这里从 smalltalk 收紧成 business，因为一批"看不懂的业务问题"
-    #   被闲聊通道接走，用店员口吻把**越权承诺**发给了客户：
-    #     「支持分期吗」→「这个我得问下店里哈，晚点回你～」（文字期货，没有人工工单）
-    #     「就它了」   →「好嘞 那这台给你留着哈」（凭空承诺）
-    #     「我要投诉」 →「咋啦这是？先别急」（投诉没进队列）
-    #   改回 smalltalk 等于把那个口子重新打开，所以**那三条必须用别的方式堵住**：
-    #     · 「就它了」这类 4 字以内看不懂的短句，在上面 `len(compact) <= 4` 那一步
-    #       就返回 business 了，不经过这里；
-    #     · 「我要投诉」被 `must_escalate` 的"投诉纠纷"（hard）在更早的位置拦下；
-    #     · 「支持分期吗」靠 `_BUSINESS_CUES` 里补的"分期/账期/月付"等信号拦住。
-    #   放宽前后都跑了 600 条评测集：危险直发（期望 escalate 却自动答）必须仍为 0。
-    #   另有两层安全网：闲聊分支要求检索分 ≤ 0.50（KB 答得出来的不会被闲聊截走），
-    #   且生成的闲聊回复要过 `_smalltalk_ok`（不许出现价格/库存/承诺）。
-    return "smalltalk"
+            return "smalltalk", True
+        return "business", True
+    # 走到这里 = 没有业务词、没指向店里、也不是请求语气，
+    # **而且超过 4 个字** —— 这是模糊地带。默认还是 smalltalk（店主定的
+    # "没有业务词就闲聊"），但标记 `confident=False`，让调用方可以问 LLM。
+    return "smalltalk", False
+
+
+def classify_message(text: str) -> str:
+    """→ ``business`` / ``smalltalk`` / ``closing``（只看正则，不问 LLM）。
+
+    需要"判不准时问 LLM"就用 :func:`classify_message_ex`。
+    """
+    return classify_message_ex(text)[0]
 
 
 # 店主理人的口吻样本 —— 用来让模型"照着这个人的话写"。

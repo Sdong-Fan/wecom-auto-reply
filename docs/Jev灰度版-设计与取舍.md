@@ -179,13 +179,38 @@ Jev 自己踩过两题矛盾（`should_answer_now` 0.77 vs `best_action` 0.60）
 
 ---
 
+## 7. 前置：怎么拿到 Jev 的 key
+
+⚠️ **Jev 不在博查开放平台（open.bocha.cn）那 4 个 API 卡片里**（那里是 Web Search / Model / Agent Search / Semantic Reranker）。
+Jev 是个**独立站点** `https://jev.bocha.cn`（一个决策模型 Playground，用模型玩马里奥/魂斗罗那种），
+接口是 `POST https://jev.bocha.cn/v1/systemone`，模型 `bocha-jev-v1`。
+
+凭据变量名（**官方 SKILL.md 的规定，按优先级**）：
+
+    首选 BOCHA_JEV_API_KEY
+    其次 BOCHA_SEARCH_API_KEY     ← "已有博查 key 且有权访问该服务时可复用"
+    兼容 JEV_API_KEY              ← Jev 聊天助手那个客户端用的名字
+
+> `JEV_UPSTREAM_API_KEY` 是**服务端内部凭据**，不是给客户端用的，别填错。
+
+**拿 key 的步骤**：
+1. 先在 open.bocha.cn 点「**点击免费领取 1000 次调用资源包**」（你截图里资源包是 0 个）
+2. 左侧「**API KEY 管理**」→ 新建/复制一把 key
+3. 把这把 key 填进项目根目录 `.env`（`BOCHA_JEV_API_KEY=xxx`），跑 `--ping` 验证
+4. **401 的话**说明这把 key 没有 Jev 权限 —— 去 `https://jev.bocha.cn` 领限时免费的，
+   或看接口文档（飞书）：https://bocha-ai.feishu.cn/wiki/PhrPwCrEaiCyyPkkDNecdfRSnHR
+5. 备用来源：OpenCode Zen（`JEV_PROVIDER=opencode`，模型 `jev-1.13-free` 限时免费）；
+   要稳定就 OpenRouter / TypeSafe 直连（付费）
+
+**已验证**：拿一把假 key 打过去返回的是 **HTTP 401**（不是 404/422），
+说明**地址与协议正确、端点可达**，只差有效凭据。
 ## 7. 怎么跑（一条命令）
 
 ```bash
 # 1) 不联网：先量现状基线（已跑过，见 docs/Jev对比-资料覆盖基线.md）
 python scripts/jev_shadow.py --dimension coverage --dry-run
 
-# 2) 配好 .env 里的 JEV_API_KEY（博查 Jev 限时免费）后先跑 30 条
+# 2) 先在 .env 里配凭据（官方名 BOCHA_JEV_API_KEY，见 §7.1）后先跑 30 条
 python scripts/jev_shadow.py --dimension coverage --limit 30
 
 # 3) 全量 322 条，出报告

@@ -290,8 +290,9 @@ async def judge_should_reply(text: str, cfg: dict = None
     from rag import jev_client
 
     if not jev_client.has_key():
-        meta["decision_path"] = "未配 JEV_API_KEY，走规则层"
-        logger.info("灰度/影子模式开着但没配 %s，本次走规则层", jev_client.ENV_KEY)
+        meta["decision_path"] = "未配 Jev 凭据，走规则层"
+        logger.info("灰度/影子模式开着但没配凭据（%s），本次走规则层",
+                    " / ".join(jev_client.ENV_KEYS))
         return rules_need, rules_reason, meta
 
     try:

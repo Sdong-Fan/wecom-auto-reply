@@ -261,7 +261,7 @@
     "_send_history_comment": "发不发对话历史给 Jev。默认 false=只发客户当前这一句，和主流程“对话不出本机”的口径一致；打开会多外发内容，想清楚再开。",
     "jev": {
       "provider": "bocha",
-      "_provider_comment": "判断模型来源，协议相同只是地址/模型不同：bocha=博查 Jev（限时免费，默认）、typesafe=TypeSafe 直连、vercel=Vercel AI Gateway、opencode=OpenCode Zen、openrouter=OpenRouter。密钥放 .env 的 JEV_API_KEY，不要写这里。",
+      "_provider_comment": "判断模型来源，协议相同只是地址/模型不同：bocha=博查 Jev（限时免费，默认）、typesafe=TypeSafe 直连、vercel=Vercel AI Gateway、opencode=OpenCode Zen、openrouter=OpenRouter。凭据放 .env（官方名 BOCHA_JEV_API_KEY；也可复用 BOCHA_SEARCH_API_KEY），不要写这里。",
       "model": "",
       "base_url": "",
       "timeout_seconds": 6,

@@ -316,12 +316,36 @@ def main() -> int:
                     help="不联网：只量现状基线（该不该答=规则层；覆盖=检索阈值）")
     ap.add_argument("--out", default="", help="Markdown 报告写到这个路径")
     ap.add_argument("--sleep", type=float, default=0.0, help="每次判断间隔（秒）")
+    ap.add_argument("--ping", action="store_true",
+                    help="只做连通性自检：验凭据 + 验协议，不跑评测")
     args = ap.parse_args()
 
     cfg = load_cfg()
     from rag import jev_client
 
     provider, base, _path, model = jev_client.resolve_config(cfg)
+
+    if args.ping:
+        print("=" * 74)
+        print("Bocha Jev 连通性自检")
+        print("=" * 74)
+        print(f"来源={provider}  地址={base}  模型={model}")
+        names = " / ".join(jev_client.ENV_KEYS)
+        print(f"凭据变量：{names}")
+        print(f"当前凭据：{'已配置' if jev_client.has_key() else '**一个都没配**'}"
+              f"（命中 {next((n for n in jev_client.ENV_KEYS if os.environ.get(n)), '无')}）")
+        ok, why = jev_client.ping(cfg)
+        print(("✅ " if ok else "❌ ") + why)
+        if not ok:
+            print("\n排查顺序：")
+            print("  1) 凭据没配 → 在项目根目录 .env 里加一行 BOCHA_JEV_API_KEY=你的key")
+            print("  2) 401 → 这把 key 没有 Jev 权限：去 https://jev.bocha.cn 领限时免费的")
+            print("     （已有博查 key 且有权访问时可复用，变量名 BOCHA_SEARCH_API_KEY）")
+            print("  3) 422 → 题目/state 形状或大小不对（脚本会打原始响应）")
+            print("  4) 404 → 模型名或地址不对")
+            print("  5) 超时/连不上 → 网络或代理")
+        return 0 if ok else 3
+
     title = {"should_reply": "该不该答", "coverage": "资料覆盖"}[args.dimension]
     print("=" * 74)
     print(f"现状 vs Jev 判断模型 —— 维度：{title}")

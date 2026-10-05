@@ -144,7 +144,8 @@ def test_missing_key_falls_back(cfg_jev, monkeypatch):
     from rag import jev_client, jev_judge
 
     monkeypatch.setattr(jev_client, "has_key", lambda: False)
-    monkeypatch.delenv(jev_client.ENV_KEY, raising=False)
+    for _k in jev_client.ENV_KEYS:
+        monkeypatch.delenv(_k, raising=False)
     need, _reason, meta = asyncio.run(
         jev_judge.judge_should_reply("请问押金要多少", cfg_jev))
     assert need is True and meta["decided_by"] == "rules"
@@ -250,9 +251,40 @@ def test_providers_cover_five_hosts_and_endpoints():
 
 
 def test_redact_secrets_never_leaks_key(monkeypatch):
-    from rag.jev_client import ENV_KEY, redact_secrets
-    monkeypatch.setenv(ENV_KEY, "secret-key-xyz")
-    assert "secret-key-xyz" not in redact_secrets("Bearer secret-key-xyz failed")
+    """三个凭据变量名里的任何一个出现在日志/异常里，都必须被抹掉。"""
+    from rag.jev_client import ENV_KEYS, redact_secrets
+    for name in ENV_KEYS:
+        for k in ENV_KEYS:
+            monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv(name, "secret-key-xyz")
+        assert "secret-key-xyz" not in redact_secrets(f"Bearer secret-key-xyz via {name}")
+
+
+def test_key_env_names_and_precedence(monkeypatch):
+    """官方文档的变量名优先：BOCHA_JEV_API_KEY > BOCHA_SEARCH_API_KEY > JEV_API_KEY。"""
+    from rag.jev_client import ENV_KEYS, has_key, key
+    assert ENV_KEYS == ("BOCHA_JEV_API_KEY", "BOCHA_SEARCH_API_KEY", "JEV_API_KEY")
+    for k in ENV_KEYS:
+        monkeypatch.delenv(k, raising=False)
+    assert has_key() is False and key() == ""
+    monkeypatch.setenv("JEV_API_KEY", "old-name")
+    assert key() == "old-name", "只配旧名也要能用（Jev 聊天助手客户端用的是这个）"
+    monkeypatch.setenv("BOCHA_SEARCH_API_KEY", "search-key")
+    assert key() == "search-key", "博查 search key 优先于旧名"
+    monkeypatch.setenv("BOCHA_JEV_API_KEY", "jev-key")
+    assert key() == "jev-key", "官方首选名优先级最高"
+
+
+def test_bocha_protocol_matches_official_skill_doc():
+    """照官方 SKILL.md 钉住博查那条路的协议与重试口径。"""
+    from rag import jev_client as jc
+    _name, base, path, model = jc.provider_spec("bocha")
+    assert base == "https://jev.bocha.cn" and path == "/v1/systemone"
+    assert model == "bocha-jev-v1"
+    # 官方：不允许未识别字段（temperature/stream 会被拒）—— 请求体只能有这三样
+    assert set({"model": 1, "state": 2, "questions": 3}) == {"model", "state", "questions"}
+    assert jc.MAX_RETRIES <= 2, "官方建议至多两次重试"
+    assert set(jc.RETRY_STATUS) == {429, 503, 529}, "官方只列这三个按 Retry-After 退避"
 
 
 def test_answer_parsers():

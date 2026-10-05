@@ -12,12 +12,31 @@ Jev 是**判断模型**：只回答**选择题 / 打分 / 是非**，返回概�
     score  → {"type": "score",  "score": 4.0, "confidence": 0.6,
               "probabilities": {"4": 0.6, "5": 0.4}}
 
-## 请求形状（两家里只有路径不同）
+## 请求形状（官方 SKILL.md 的最小调用）
 
-    POST {base}{path}
-    {"model": "...", "state": {...}, "questions": {...}}
+    POST https://jev.bocha.cn/v1/systemone
+    Authorization: Bearer <key>
+    {"model": "bocha-jev-v1", "state": <字符串/对象/数组>, "questions": {...}}
 
-`state` 里放对话，`questions` 一次可以把**全部题目**带上（官方推荐，加题不加价）。
+几处**官方明确写死的约束**（踩了就 422，不会自动截断）：
+
+* `state` 是**自由格式**（字符串 / 对象 / 数组都行）——放对话上下文。
+* `questions` 由调用方自定义 id 键；每题 `{type, instructions, criteria}`。
+* 一请求 **1~32 题**，候选总数 ≤ 1024（每个 noul 算两个候选）。
+* **单题**输入 ≤ 32768 token（共享的 state + instructions + 全部候选**加起来**算这一题）。
+* instructions ≤ 8192 字符。
+* **不允许 `temperature` / `stream` 等未识别字段**（会被拒）。
+* `noul` 是**为真的概率**（0~1），不是布尔；`score` 是**零基下标的概率加权**，不是档位数字。
+* 响应顶层是 `model / answers / usage / metadata`，**没有 code/msg/data 外壳**。
+* 401 查 key；413/422 先改大小/类型再重试；429/503/529 按 `Retry-After` 退避。
+
+## 凭据（官方文档的变量名）
+
+    首选 BOCHA_JEV_API_KEY
+    其次 BOCHA_SEARCH_API_KEY（已有博查 key 且有权访问该服务时可复用）
+    兼容 JEV_API_KEY（Jev 聊天助手那个客户端用的名字）
+
+注意 `JEV_UPSTREAM_API_KEY` 是**服务端内部凭据**，不是给客户端用的。
 
 ## 设计取舍（都是刻意的）
 
@@ -42,10 +61,17 @@ from typing import Optional, Tuple
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 6.0          # 客户在等，判断不能慢；超过就退回规则层
-MAX_RETRIES = 1                # 只重试一次：低延迟优先，不是离线批处理
+MAX_RETRIES = 2                # 官方建议"至多两次"重试
+RETRY_STATUS = (429, 503, 529)  # 限流 / 不可用 / 过载
+
+# 凭据变量名，**按优先级排**（官方 SKILL.md 的 Configure access 一节）：
+#   首选 BOCHA_JEV_API_KEY；已有博查 key 有权访问时可复用 BOCHA_SEARCH_API_KEY；
+#   最后兼容 Jev 聊天助手客户端用的 JEV_API_KEY。
+ENV_KEYS = ("BOCHA_JEV_API_KEY", "BOCHA_SEARCH_API_KEY", "JEV_API_KEY")
+ENV_KEY = ENV_KEYS[-1]         # 兼容旧引用（日志/测试里用得到）
 
 # 各家托管（协议相同，只有 base + 路径 + 默认模型不同）。
-# 来源：Jev 聊天助手 README 的"接口与模型"一节；OpenRouter 那条的路径确实不一样
+# 来源：Jev 聊天助手 README / CHANGELOG 的"接口与模型"一节；OpenRouter 那条的路径确实不一样
 # （SDK 把路径写死成 /v1/systemone，打不到 OpenRouter 的 /api/alpha/decisions）。
 _PROVIDER = Tuple[str, str, str, str]      # (显示名, base_url, path, 默认模型)
 PROVIDERS: dict = {
@@ -62,8 +88,6 @@ PROVIDERS: dict = {
 }
 DEFAULT_PROVIDER = "bocha"                 # 限时免费，拿来做灰度实验成本最低
 
-ENV_KEY = "JEV_API_KEY"
-
 
 class JevError(Exception):
     """判断调用失败。**调用方必须捕获它并退回规则层**，不要让它冒到主链路。"""
@@ -73,13 +97,23 @@ class JevError(Exception):
         self.status = status
 
 
+def key() -> str:
+    """按优先级取一把可用的凭据（都没有就空字符串）。"""
+    for name in ENV_KEYS:
+        v = (os.environ.get(name) or "").strip()
+        if v:
+            return v
+    return ""
+
+
 def redact_secrets(text) -> str:
     """把 key 从任何要落盘的字符串里抹掉（异常、响应体、日志都过这里）。"""
     if not isinstance(text, str):
         text = str(text)
-    key = os.environ.get(ENV_KEY) or ""
-    if key:
-        text = text.replace(key, "[REDACTED]")
+    for name in ENV_KEYS:
+        k = (os.environ.get(name) or "").strip()
+        if k:
+            text = text.replace(k, "[REDACTED]")
     return text
 
 
@@ -89,7 +123,7 @@ def provider_spec(name: str) -> _PROVIDER:
 
 def has_key() -> bool:
     """有没有配 key —— 没有就别浪费时间试（灰度/影子模式会据此自动跳过）。"""
-    return bool((os.environ.get(ENV_KEY) or "").strip())
+    return bool(key())
 
 
 def resolve_config(cfg: dict = None) -> Tuple[str, str, str, str]:
@@ -136,7 +170,8 @@ def _one_shot(url: str, payload: bytes, key: str, timeout: float) -> dict:
         url, data=payload, method="POST",
         headers={
             "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json; charset=utf-8",
+            # 与官方最小示例保持一致（不带 charset，免得严格校验的网关挑刺）
+            "Content-Type": "application/json",
             "Accept": "application/json",
         },
     )
@@ -144,42 +179,57 @@ def _one_shot(url: str, payload: bytes, key: str, timeout: float) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def ask(state: dict, questions: dict, cfg: dict = None,
+def _retry_after(exc: urllib.error.HTTPError, default: float) -> float:
+    """官方要求 429/503/529 按 Retry-After 退避；没给就用默认。"""
+    try:
+        raw = (exc.headers.get("Retry-After") or "").strip()
+        return max(0.0, min(10.0, float(raw))) if raw else default
+    except Exception:
+        return default
+
+
+def ask(state, questions: dict, cfg: dict = None,
         timeout: float = None) -> dict:
-    """问 Jev 一轮判断 → ``{"answers": {题目名: 答案}, "usage": {...}}``。
+    """问 Jev 一轮判断 → ``{"answers": {题目名: 答案}, "usage": {...}, ...}``。
+
+    `state` 是**自由格式**（字符串 / 对象 / 数组都行），按官方 SKILL.md。
 
     **同步阻塞**（几秒）。在 asyncio 里请用 `ask_async()`，别卡住事件循环。
     失败一律抛 `JevError`，调用方负责降级。
     """
     name, base, path, model = resolve_config(cfg)
-    key = (os.environ.get(ENV_KEY) or "").strip()
-    if not key:
-        raise JevError(f"没配 {ENV_KEY}（判断调用跳过）")
+    api_key = key()
+    if not api_key:
+        raise JevError(f"没配凭据（{' / '.join(ENV_KEYS)} 都没值），判断调用跳过")
     timeout = timeout or timeout_of(cfg)
     url = f"{base}{path}"
     payload = json.dumps(
         {"model": model, "state": state, "questions": questions},
         ensure_ascii=False).encode("utf-8")
 
+    # 官方限了请求体 256 KiB：超了先自己拦（避免 422 白白等一轮）
+    if len(payload) > 262144:
+        raise JevError(f"请求体 {len(payload)} 字节超官方上限 256 KiB —— 少带点上下文")
+
     last_err = None
     for attempt in range(MAX_RETRIES + 1):
         started = time.time()
         try:
-            data = _one_shot(url, payload, key, timeout)
+            data = _one_shot(url, payload, api_key, timeout)
             logger.info("Jev 判断成功: %s/%s %.2fs",
                         name, model, time.time() - started)
             return data
         except urllib.error.HTTPError as e:
             status = e.code
             body = _error_body(e)
-            hint = {401: "密钥被拒", 403: "没有权限", 404: "模型或地址不对",
-                    422: "请求被拒（题目/state 形状可能不对）",
-                    429: "被限流", 529: "服务过载"}.get(status, "")
-            last_err = JevError(
-                f"Jev HTTP {status}: {hint or body[:200]}", status)
-            # 只有限流/过载值得重试；参数错重试也没用
-            if status in (429, 529) and attempt < MAX_RETRIES:
-                time.sleep(min(2.0, 0.5 * (2 ** attempt)))
+            hint = {401: "密钥被拒（检查 BOCHA_JEV_API_KEY）", 403: "没有权限",
+                    404: "模型或地址不对",
+                    413: "请求体太大", 422: "请求被拒（题目/state 形状或大小不对）",
+                    429: "被限流", 503: "服务不可用", 529: "服务过载"}.get(status, "")
+            last_err = JevError(f"Jev HTTP {status}: {hint or body[:200]}", status)
+            # 官方：只对 429/503/529 按 Retry-After 退避重试；参数错重试没用
+            if status in RETRY_STATUS and attempt < MAX_RETRIES:
+                time.sleep(_retry_after(e, 0.5 * (2 ** attempt)))
                 continue
             raise last_err from None
         except (TimeoutError, socket.timeout):
@@ -198,7 +248,7 @@ def ask(state: dict, questions: dict, cfg: dict = None,
     raise last_err or JevError("Jev 调用失败")
 
 
-async def ask_async(state: dict, questions: dict, cfg: dict = None) -> dict:
+async def ask_async(state, questions: dict, cfg: dict = None) -> dict:
     """给 asyncio 用的包装：放到线程里跑，别阻塞主循环。"""
     import asyncio
     return await asyncio.to_thread(ask, state, questions, cfg)
@@ -210,7 +260,7 @@ def ping(cfg: dict = None) -> Tuple[bool, str]:
     用一道最便宜的 noul 题探活：既验证 key，也验证题目形状能不能被接受。
     """
     if not has_key():
-        return False, f"没配 {ENV_KEY}"
+        return False, "没配凭据（BOCHA_JEV_API_KEY / BOCHA_SEARCH_API_KEY / JEV_API_KEY）"
     name, base, _path, model = resolve_config(cfg)
     probe = {"ping": {
         "type": "noul",

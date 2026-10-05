@@ -27,7 +27,8 @@ from rag.guard import (classify_and_dispatch, check_retrieval, high_threshold,
                        UNCERTAINTY_KEYWORDS, GENERIC_REPLY_PATTERNS,
                        HEDGE_PHRASES, out_of_scope, must_escalate,
                        unsafe_promise, deferral_phrase, decision_path_of,
-                       LOW_RETRIEVAL_THRESHOLD)
+                       LOW_RETRIEVAL_THRESHOLD,
+                       escalate_tier, kb_first_settings)
 from rag.judge import should_reply, is_low_information
 from rag.jev_judge import judge_should_reply
 from rag.local_answers import answer_locally, now_line
@@ -398,23 +399,28 @@ class Responder:
                 retrieval_score=0.0,
             )
 
-        # ── 必须转人工：投诉纠纷 / 议价特批 / 重复追问 ────────────────
-        # 这三类不是"资料库有没有"的问题，而是**权限问题**：机器人无权受理投诉、
-        # 无权改价、无权处理没解决的追问。所以不看检索分，命中就转人工。
-        # 实测（200 条测试集）：「我要投诉」被当寒暄接走、投诉没进人工队列；
-        # 「能不能便宜点」直接答了折扣规则（越权报价）。
-        hard = must_escalate(text)
-        if hard:
-            logger.warning(f"必须转人工（{hard}）: {text[:40]!r}")
-            notify_escalation(customer_name, text, reason=hard)
+        # ── 必须转人工：分两级（2026-10-05「资料库优先」）──────────────
+        # 硬红线（权限/安全/实时状态）：命中即转人工，检索分再高也不放行。
+        # 软原因（订单变更/发票寄送/店内情况/政策未覆盖）：**延后到检索之后**再判 ——
+        #   资料库命中就以资料库为主，命中不了才转人工。
+        # 为什么：店主反馈"我资料库再完善，依旧无法完全替代人工"，根因就是
+        #   规则层跑在检索之前，资料库里的答案根本没机会被用上。
+        kb_first_on, kb_first_min = kb_first_settings(self._config)
+        esc_reason = must_escalate(text)
+        soft_reason = ""
+        if esc_reason and (not kb_first_on or escalate_tier(esc_reason) == "hard"):
+            logger.warning(f"必须转人工（{esc_reason}）: {text[:40]!r}")
+            notify_escalation(customer_name, text, reason=esc_reason)
             return ReplyResult(
-                success=False, reason=hard, escalated=True,
+                success=False, reason=esc_reason, escalated=True,
                 hold_text=await self._make_hold_reply(text, retrieve=True),
                 dispatch_level="human_handle",
                 guard_decision="must_escalate",
-                guard_reason=hard,
+                guard_reason=esc_reason,
                 retrieval_score=0.0,
             )
+        if esc_reason:
+            soft_reason = esc_reason      # 等检索分出来再定
 
         # ── 本地直答：问"现在几点/今天几号"这类 ──────────────────
         # 知识库里不可能有"现在几点"，模型也没有时钟；让模型编时间是错的。
@@ -464,6 +470,29 @@ class Responder:
         # "数字必须有出处"检查也能把它当出处（否则回复里写个时间就判成编造）。
         chunks = [now_line()] + chunks
         top_score = scores[0] if scores else 0.0
+
+        # ── 软原因落定（「资料库优先」）─────────────────────────────
+        # 到这里才知道资料库答不答得出来：
+        #   够分 → 以资料库为主，继续往下走生成（规则让位给资料库）；
+        #   不够分 → 按规则转人工（资料库都不知道，只能人工兜底）。
+        if soft_reason:
+            if top_score >= kb_first_min:
+                logger.info("资料库优先：资料库最高分 %.3f ≥ %.2f，按资料库回答"
+                            "（覆盖转人工原因=%s）: %r"
+                            % (top_score, kb_first_min, soft_reason, text[:40]))
+            else:
+                logger.warning("必须转人工（%s；资料库最高分 %.3f < %.2f）: %r"
+                               % (soft_reason, top_score, kb_first_min, text[:40]))
+                notify_escalation(customer_name, text, reason=soft_reason)
+                return ReplyResult(
+                    success=False, reason=soft_reason, escalated=True,
+                    hold_text=await self._make_hold_reply(
+                        text, chunks=chunks, top_score=top_score),
+                    dispatch_level="human_handle",
+                    guard_decision="must_escalate",
+                    guard_reason=soft_reason,
+                    retrieval_score=top_score,
+                )
 
         # ── Pre-generation retrieval check ─────────────────────────
 

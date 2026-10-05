@@ -66,7 +66,13 @@ docs/面试冲刺/
 *.backup
 *.tmp
 *.temp
-_*.py
+# 只忽略仓库根目录下的临时草稿脚本（如 _thr_predict.py）。
+# ★ 原来写的是 `_*.py`，它会匹配**任何目录下**以 _ 开头的文件 ——
+#   实测后果：15 个包的 __init__.py（config/ rag/ gui/ wxbot/…）和
+#   wxbot/detector/_message_detector.py 全都没进仓库，
+#   干净 clone 下来 `import wxbot.detector` 直接
+#   ModuleNotFoundError: 'wxbot.detector' is not a package（仓库跑不起来）。
+/_*.py
 debug_*.png
 debug_*.txt
 debug/2*/

@@ -63,10 +63,16 @@ def embed_and_store(
     qdrant: QdrantClient,
     collection_name: str = None,
     source: str = "unknown",
+    extra: dict = None,
 ) -> int:
     """Embed all chunks and upsert into Qdrant. Returns count of points upserted.
 
     Uses local BGE model — no API calls, no keys, no limits.
+
+    ``extra``：附加到 payload 的额外字段（例如 ``{"origin": "AI整理"}``）。
+    ★ 不要用 ``source`` 来标记来源种类 —— 它是**文件名**，
+    `pipeline.upload.delete_source_points` 靠它精确匹配来删掉某个文件的索引，
+    改写它会让"重传替换 / 删除这个文件的索引"失效。
     """
     model = get_model()
     if not collection_name:
@@ -80,13 +86,16 @@ def embed_and_store(
             continue
         embedding = model.encode(embed_text_for(chunk),
                                  normalize_embeddings=True).tolist()
+        payload = {
+            "text": chunk, "source": source, "index": i,
+            "chunk_id": chunk_id(chunk),
+        }
+        if extra:
+            payload.update(extra)
         points.append(PointStruct(
             id=chunk_id(chunk),
             vector=embedding,
-            payload={
-                "text": chunk, "source": source, "index": i,
-                "chunk_id": chunk_id(chunk),
-            },
+            payload=payload,
         ))
         if (i + 1) % 50 == 0:
             logger.info(f"Embedded {i + 1}/{len(chunks)} chunks")

@@ -507,7 +507,10 @@ class KbDialog:
         r1 = ttk.Frame(up)
         r1.pack(fill=tk.X, padx=8, pady=6)
         ttk.Button(r1, text="选择文件…", command=self._kb_pick_files).pack(side=tk.LEFT)
-        ttk.Button(r1, text="重建索引", command=self._kb_rebuild).pack(side=tk.LEFT, padx=6)
+        # AI 整理：陈述句/表格 → 问答。整理结果先预览，勾选后才写入。
+        ttk.Button(r1, text="用 AI 整理成问答…",
+                   command=self._kb_ai_ingest).pack(side=tk.LEFT, padx=6)
+        ttk.Button(r1, text="重建索引", command=self._kb_rebuild).pack(side=tk.LEFT)
         self._kb_up_status = ttk.Label(r1, text="", foreground=COLORS["ink_mute"])
         self._kb_up_status.pack(side=tk.LEFT, padx=10)
 
@@ -678,6 +681,32 @@ class KbDialog:
                        ("所有文件", "*.*")])
         if paths:
             self._kb_import(list(paths))
+
+    def _kb_ai_ingest(self):
+        """用 AI 把一份资料整理成问答 —— 先预览、人工勾选、再写入。
+
+        和「选择文件…」的区别：那条路是**原文照搬进库**；
+        这条是让 LLM 把陈述句/表格拆成多条"客户会怎么问"的问答。
+        为什么要拆：问答型 chunk 只嵌入"问题"部分，问法直接决定召回
+        （实测同一段内容，问句一字不差时问答式 0.941 / 陈述句 0.724）。
+        """
+        if self.qdrant is None:
+            self._kb_up_status.config(text="拿不到资料库连接", foreground=COLORS["danger"])
+            return
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            title="选一份资料，让 AI 整理成问答（一次一个文件）",
+            filetypes=[("表格与文档", "*.xlsx *.xlsm *.xls *.docx"),
+                       ("文本资料", "*.txt *.md *.csv"),
+                       ("所有文件", "*.*")])
+        if not path:
+            return
+        from gui.llm_ingest_dialog import open_ingest
+        open_ingest(self.win, [path], qdrant=self.qdrant, collection=self.collection,
+                    on_done=lambda n: (self._kb_load(0),
+                                       self._kb_up_status.config(
+                                           text="AI 整理写入 %d 条" % n,
+                                           foreground=COLORS["success"])))
 
     def _kb_import(self, paths):
         """导入跑在**后台线程**：嵌入要加载模型、几十块可能十几秒，不能卡界面。"""

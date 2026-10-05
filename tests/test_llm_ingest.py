@@ -87,3 +87,84 @@ def test_parse_pairs_joins_multiline_answer():
 def test_parse_pairs_ignores_preamble():
     out = parse_pairs("好的，整理如下：\n客户问题: 甲\n销售回答: 乙")
     assert out == [("甲", "乙")]
+
+
+# ── 批量整理（LLM 用假的，不花 token）────────────────────────────────
+
+def test_build_entries_marks_bad_ones(monkeypatch):
+    """整批整理：能过的过、改坏数字的标红，且**一条坏的不影响其它条**。"""
+    import asyncio
+
+    from rag import llm_ingest as li
+
+    async def fake(chunk, model=None):
+        return [("A7M4日租多少", "索尼 A7M4 日租 90 元。"),
+                ("A7M4押金多少", "押金 4000 元，即 4 万元？")]
+
+    monkeypatch.setattr(li, "restructure", fake)
+    entries = asyncio.run(li.build_entries(["索尼 A7M4 日租 90 元，押金 4000 元。"]))
+    assert [e["ok"] for e in entries] == [True, False]
+    assert "单位" in " ".join(entries[1]["problems"])
+
+
+def test_build_entries_survives_llm_failure(monkeypatch):
+    """某一块 LLM 调用失败 → 记一条错误条目，不炸掉整批。"""
+    import asyncio
+
+    from rag import llm_ingest as li
+
+    async def boom(chunk, model=None):
+        raise RuntimeError("接口 500")
+
+    monkeypatch.setattr(li, "restructure", boom)
+    entries = asyncio.run(li.build_entries(["随便一段原文"]))
+    assert len(entries) == 1 and entries[0]["ok"] is False
+    assert "LLM 调用失败" in entries[0]["problems"][0]
+
+
+def test_build_entries_reports_progress(monkeypatch):
+    import asyncio
+
+    from rag import llm_ingest as li
+
+    async def fake(chunk, model=None):
+        return [("问", "回答内容够长")]
+
+    monkeypatch.setattr(li, "restructure", fake)
+    seen = []
+    asyncio.run(li.build_entries(["a", "b", "c"],
+                                 on_progress=lambda d, t: seen.append((d, t))))
+    assert seen == [(1, 3), (2, 3), (3, 3)]
+
+
+def test_to_faq_roundtrips_through_split():
+    from rag.kb_tools import split_faq
+    from rag.llm_ingest import to_faq
+    text = to_faq({"question": "A7M4多少钱", "answer": "日租 90 元"})
+    assert split_faq(text) == ("A7M4多少钱", "日租 90 元")
+
+
+def test_summary_counts():
+    from rag.llm_ingest import summary
+    out = summary([{"chunk": "x", "ok": True}, {"chunk": "x", "ok": False},
+                   {"chunk": "y", "ok": True}])
+    assert out == {"total": 3, "ok": 2, "bad": 1, "chunks": 2}
+
+
+def test_extra_payload_is_merged_but_source_kept():
+    """`extra` 只加字段，**不能动 source** —— 它是文件名，删除/替换索引靠它精确匹配。"""
+    import inspect
+
+    from pipeline import embedder
+    src = inspect.getsource(embedder.embed_and_store)
+    assert '"source": source' in src
+    assert "payload.update(extra)" in src
+
+
+def test_gui_dialog_refuses_multiple_files():
+    """一次只整理一个文件：source 要精确对应文件名，混着多个就说不清来源。"""
+    import pytest
+    from gui.llm_ingest_dialog import LlmIngestDialog
+    with pytest.raises(ValueError):
+        LlmIngestDialog.__new__(LlmIngestDialog).__init__(
+            None, ["a.txt", "b.txt"])

@@ -35,14 +35,27 @@ COL_Q = "question"
 COL_A = "answer"
 COL_WHY = "why"
 
-# 单个文件最多整理多少块（省 token：一块一次 LLM 调用，且要人工核对）
-MAX_CHUNKS_PER_FILE = 200
+# 默认整理多少块。★ 为什么要有上限、而且**必须明说**：
+#   一块 = 一次 LLM 调用。5000 行的表格（pipeline.upload.MAX_TABLE_ROWS=5000）
+#   全量整理要跑几小时、烧掉不少 token，不能一声不吭就开始。
+#   但**截断必须说出来** —— 静默只整理前 N 块是最糟的行为：
+#   用户以为全导进去了，实际一半没进，而且看不出来。
+DEFAULT_MAX_CHUNKS = 100
 
 
 def open_ingest(parent: tk.Misc, paths: List[str], qdrant=None,
                 collection: str = None, on_done=None,
                 model: str = None) -> "LlmIngestDialog":
     return LlmIngestDialog(parent, paths, qdrant, collection, on_done, model)
+
+
+def plan_chunks(all_chunks: List[str], cap: int = DEFAULT_MAX_CHUNKS):
+    """→ ``(这次要整理的块, 被截断的块数)``。
+
+    单独抽出来是为了能直接测 —— 截断这件事**必须被算清楚并说出来**，
+    不能在界面代码里靠一句切片蒙过去。
+    """
+    return all_chunks[:cap], max(0, len(all_chunks) - cap)
 
 
 class LlmIngestDialog:
@@ -64,6 +77,7 @@ class LlmIngestDialog:
         self.entries: List[dict] = []
         self._picked = {}                      # tree iid → bool（勾选状态）
         self._stop = False
+        self.truncated = 0                     # 因上限没整理的块数（会在界面上说明）
 
         self.win = tk.Toplevel(parent)
         self.win.title("AI 整理导入 —— 确认后再写入")
@@ -155,7 +169,7 @@ class LlmIngestDialog:
 
         p = self.paths[0]
         try:
-            all_chunks = chunks_from_file(p, limit=MAX_CHUNKS_PER_FILE)
+            all_chunks = chunks_from_file(p, limit=100000)      # 先全读出来数一下
         except Exception as e:
             self._ui(lambda: self._fail("%s 读不了：%s" % (Path(p).name, e)))
             return
@@ -163,13 +177,29 @@ class LlmIngestDialog:
             self._ui(lambda: self._fail("这个文件里没有可整理的文字。"))
             return
 
+        total_chunks = len(all_chunks)
+        chunks, self.truncated = plan_chunks(all_chunks)
+
+        # 块数多 → **先说清代价再开始**（一次调用一块，慢且花 token）
+        if total_chunks > 20:
+            note = ("这份资料共 %d 块，将整理**前 %d 块**（每块一次 AI 调用，"
+                    "可能要几分钟）。" % (total_chunks, len(chunks)))
+            if self.truncated:
+                note += "\n\n剩余 %d 块这次不整理（要不要继续？\n"\
+                        "想全整理请拆成几个文件分批来）。" % self.truncated
+            if not self._ask(note, "开始 AI 整理？"):
+                self._ui(self._on_close)
+                return
+
         model = self.model or cfg_model
-        self._ui(lambda: self._status.config(
-            text="共 %d 块，正在交给 AI 整理…" % len(all_chunks),
-            foreground=COLORS["warning"]))
+        msg = "共 %d 块" % len(chunks)
+        if self.truncated:
+            msg += "（该文件共 %d 块，只整理前 %d 块）" % (total_chunks, len(chunks))
+        self._ui(lambda m=msg: self._status.config(
+            text=m + "，正在交给 AI 整理…", foreground=COLORS["warning"]))
 
         try:
-            entries = asyncio.run(build_entries(all_chunks, model=model,
+            entries = asyncio.run(build_entries(chunks, model=model,
                                                 on_progress=self._progress))
         except Exception as e:
             self._ui(lambda: self._fail("整理失败：%s" % e))
@@ -188,6 +218,25 @@ class LlmIngestDialog:
         except Exception:
             pass
 
+    def _ask(self, question: str, title: str) -> bool:
+        """在**后台线程里**问一句（messagebox 必须跑在主线程）。
+
+        做法：把弹窗丢给 `after(0, …)` 在主线程执行，这里等一个 Event。
+        超时就当"不继续" —— 窗口被关掉时 after 会失败，不能让线程挂死。
+        """
+        box = {"v": False}
+        ev = threading.Event()
+
+        def ask():
+            try:
+                box["v"] = bool(messagebox.askyesno(title, question))
+            finally:
+                ev.set()
+
+        self._ui(ask)
+        ev.wait(timeout=120)
+        return box["v"]
+
     def _fail(self, msg):
         self._status.config(text=msg.split("\n")[0], foreground=COLORS["danger"])
         messagebox.showerror("AI 整理", msg)
@@ -204,7 +253,10 @@ class LlmIngestDialog:
             ), tags=("ok" if e["ok"] else "bad",))
             self._picked[iid] = e["ok"]
         self._status.config(
-            text="整理完成：%d 条，通过 %d，标红 %d" % (len(entries), ok, len(entries) - ok),
+            text="整理完成：%d 条，通过 %d，标红 %d%s"
+                 % (len(entries), ok, len(entries) - ok,
+                    "（另有 %d 块未整理，受上限限制）" % self.truncated
+                    if self.truncated else ""),
             foreground=COLORS["success"] if ok else COLORS["warning"])
         self._write_btn.config(state=tk.NORMAL if ok else tk.DISABLED)
         self._refresh_count()

@@ -168,3 +168,21 @@ def test_gui_dialog_refuses_multiple_files():
     with pytest.raises(ValueError):
         LlmIngestDialog.__new__(LlmIngestDialog).__init__(
             None, ["a.txt", "b.txt"])
+
+
+@pytest.mark.parametrize("n,cap,keep,cut", [
+    (0, 100, 0, 0),
+    (5, 100, 5, 0),
+    (100, 100, 100, 0),
+    (101, 100, 100, 1),
+    (5000, 100, 100, 4900),
+])
+def test_plan_chunks_counts_truncation(n, cap, keep, cut):
+    """截断必须被**算出来**，界面上要说"另有 N 块未整理"。
+
+    静默截断是最糟的行为：用户以为全导进去了，实际一半没进，还看不出来。
+    （表格上限 MAX_TABLE_ROWS=5000，所以 5000 这种规模是真会发生的。）
+    """
+    from gui.llm_ingest_dialog import plan_chunks
+    chunks, truncated = plan_chunks([str(i) for i in range(n)], cap=cap)
+    assert len(chunks) == keep and truncated == cut

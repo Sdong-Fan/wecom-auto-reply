@@ -87,6 +87,36 @@ def load_cfg() -> dict:
         return {}
 
 
+def load_env() -> str:
+    """把项目根目录的 `.env` 读进环境变量（**只认自己目录下的**，不往上翻）。
+
+    ★ 必须显式传路径：`load_dotenv()` 无参时会从 cwd 一路往上找 `.env`，
+      会把不相干的密钥读进来（主线在 main.py 里也踩过这个坑）。
+      返回实际加载的文件路径（没找到就空字符串），方便排查"为什么说没配 key"。
+    """
+    path = ROOT / ".env"
+    if not path.is_file():
+        return ""
+    try:
+        from dotenv import load_dotenv
+    except Exception:
+        # 没装 python-dotenv 就手动解析（凭据只在 .env 里，别让脚本因此静默失效）
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+            return str(path)
+        except Exception:
+            return ""
+    load_dotenv(path, override=False)   # 已有环境变量优先，别覆盖用户显式设的
+    return str(path)
+
+
 def baseline_threshold(cfg: dict) -> float:
     try:
         return float(cfg.get("rag", {}).get("high_confidence_threshold", 0.5))
@@ -320,6 +350,7 @@ def main() -> int:
                     help="只做连通性自检：验凭据 + 验协议，不跑评测")
     args = ap.parse_args()
 
+    env_path = load_env()
     cfg = load_cfg()
     from rag import jev_client
 
@@ -332,6 +363,7 @@ def main() -> int:
         print(f"来源={provider}  地址={base}  模型={model}")
         names = " / ".join(jev_client.ENV_KEYS)
         print(f"凭据变量：{names}")
+        print(f".env      ：{env_path or '（没找到 ' + str(ROOT / '.env') + '）'}")
         print(f"当前凭据：{'已配置' if jev_client.has_key() else '**一个都没配**'}"
               f"（命中 {next((n for n in jev_client.ENV_KEYS if os.environ.get(n)), '无')}）")
         ok, why = jev_client.ping(cfg)

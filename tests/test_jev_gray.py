@@ -287,6 +287,44 @@ def test_bocha_protocol_matches_official_skill_doc():
     assert set(jc.RETRY_STATUS) == {429, 503, 529}, "官方只列这三个按 Retry-After 退避"
 
 
+def test_shadow_script_loads_env_from_repo_root_only(tmp_path, monkeypatch):
+    """离线脚本必须能读到项目根 `.env` 里的凭据 —— 且**只读自己目录下的**。
+
+    踩过两次的坑：无参 `load_dotenv()` 会从 cwd 一路往上找 `.env`，
+    把不相干的密钥读进来。这里钉住"只认 ROOT/.env"。
+    """
+    import importlib.util
+
+    from rag.jev_client import ENV_KEYS
+    spec = importlib.util.spec_from_file_location(
+        "jev_shadow", ROOT / "scripts" / "jev_shadow.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    # 1) 项目根 .env 存在时能读到（用 monkeypatch 改 ROOT 指向临时目录，别动真 .env）
+    fake_root = tmp_path
+    (fake_root / ".env").write_text("BOCHA_JEV_API_KEY=from-repo-root\n",
+                                    encoding="utf-8")
+    for k in ENV_KEYS:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(m, "ROOT", fake_root)
+    assert m.load_env() == str(fake_root / ".env")
+    import os
+    assert os.environ.get("BOCHA_JEV_API_KEY") == "from-repo-root"
+
+    # 2) 往上翻的那个目录里的 .env 不许被读到
+    for k in ENV_KEYS:
+        monkeypatch.delenv(k, raising=False)
+    up = tmp_path / "parent"
+    root2 = up / "child"
+    root2.mkdir(parents=True)
+    (up / ".env").write_text("BOCHA_JEV_API_KEY=from-parent-DO-NOT-READ\n",
+                             encoding="utf-8")
+    monkeypatch.setattr(m, "ROOT", root2)
+    assert m.load_env() == "", "自己目录下没有 .env 就该返回空，而不是往上找"
+    assert os.environ.get("BOCHA_JEV_API_KEY") is None
+
+
 def test_answer_parsers():
     from rag.jev_judge import coverage_from_answers, decide_from_answers
     need, _reason, ev = decide_from_answers(

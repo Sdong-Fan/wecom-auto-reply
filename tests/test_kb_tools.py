@@ -139,3 +139,60 @@ def test_dialog_builds_with_pages(tmp_path):
         dlg.win.destroy()
     finally:
         root.destroy()
+
+
+def _button_texts(widget):
+    """递归收集所有按钮文字（GUI 只能这么验，tkinter 没有控件查询 API）。"""
+    import tkinter as tk
+    out = []
+    for child in widget.winfo_children():
+        if isinstance(child, tk.ttk.Button):
+            try:
+                out.append(str(child.cget("text")))
+            except Exception:
+                pass
+        out += _button_texts(child)
+    return out
+
+
+def _kb_dialog(root):
+    from gui.kb_dialog import KbDialog
+    c = _client([_pt(1, "索尼 A7M4 日租 90 元", "价目表.csv")])
+    return KbDialog(root, {}, qdrant=c)
+
+
+def test_kb_page_has_ai_ingest_button():
+    """知识库页必须有「用 AI 整理成问答…」入口（否则功能等于没接）。"""
+    tk = pytest.importorskip("tkinter")
+    try:
+        root = tk.Tk()
+    except Exception as e:
+        pytest.skip(f"没有可用的显示环境: {e}")
+    root.withdraw()
+    try:
+        dlg = _kb_dialog(root)
+        root.update()
+        texts = _button_texts(dlg.win)
+        assert any("AI 整理" in t for t in texts), texts
+        dlg.win.destroy()
+    finally:
+        root.destroy()
+
+
+def test_ai_ingest_without_connection_does_not_crash():
+    """拿不到资料库连接时只提示，不许抛异常（点一下按钮就崩最招骂）。"""
+    tk = pytest.importorskip("tkinter")
+    try:
+        root = tk.Tk()
+    except Exception as e:
+        pytest.skip(f"没有可用的显示环境: {e}")
+    root.withdraw()
+    try:
+        dlg = _kb_dialog(root)
+        root.update()
+        dlg.qdrant = None
+        dlg._kb_ai_ingest()          # 不应抛
+        assert "拿不到资料库连接" in dlg._kb_up_status.cget("text")
+        dlg.win.destroy()
+    finally:
+        root.destroy()

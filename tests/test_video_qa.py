@@ -12,7 +12,31 @@ load_dotenv()
 
 from pipeline.video_qa import generate_qa_from_transcript
 
+# ★ 2026-10-06：这一组用例会**真的调 LLM** 生成问答，所以默认**跳过**。
+#
+# 为什么：它们断言的是"LLM 返回了内容"，而 `generate_qa_from_transcript`
+# 超时时会吃掉异常返回 `[]` → 断言失败。于是**接口一慢，套件就红**，
+# 失败信息只有 "Request timed out"，跟任何代码改动都无关
+# （2026-10-06 实测：单个文件跑了 95 秒、两条失败，白查一轮）。
+#
+# 想验这条链路：
+#     RUN_LLM_TESTS=1 python -m pytest tests/test_video_qa.py -v
+needs_llm = pytest.mark.skipif(
+    os.environ.get("RUN_LLM_TESTS", "").strip() != "1",
+    reason="要真调 LLM 生成问答：设 RUN_LLM_TESTS=1 才跑（默认跳过，"
+           "免得接口慢把套件拖红）"
+)
 
+
+class TestEmptyTranscript:
+    """不调 LLM 的那部分 —— 空文本直接返回，跟网络无关。"""
+
+    def test_empty_transcript_returns_empty_list(self):
+        """Empty transcript should return empty list, not crash."""
+        assert generate_qa_from_transcript("") == []
+
+
+@needs_llm
 class TestGenerateQaFromTranscript:
     """Tests for LLM-based Q&A generation from video transcripts."""
 
@@ -33,14 +57,12 @@ class TestGenerateQaFromTranscript:
         """Each Q and A should be non-empty strings."""
         transcript = "课程价格是2980元，包含10节课，每节课30分钟"
         result = generate_qa_from_transcript(transcript)
+        # ★ 先断言"确实拿到了东西"：原来只有下面那个 for 循环，
+        #   而 LLM 超时返回 [] 时循环体根本不执行 → **空跑通过**（假测试）。
+        assert result, "LLM 没返回任何问答（超时或生成失败）"
         for item in result:
             assert isinstance(item["q"], str) and len(item["q"]) > 0
             assert isinstance(item["a"], str) and len(item["a"]) > 0
-
-    def test_empty_transcript_returns_empty_list(self):
-        """Empty transcript should return empty list, not crash."""
-        result = generate_qa_from_transcript("")
-        assert result == []
 
     def test_short_transcript_returns_empty_or_qa(self):
         """Very short transcript may return empty list (acceptable)."""

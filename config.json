@@ -224,6 +224,10 @@
     "provider": "deepseek",
     "model": "deepseek-chat"
   },
+  "ui": {
+    "always_on_top": false,
+    "_comment": "窗口是否置顶。默认 false —— 不主动压住别的窗口；底部「窗口置顶」勾选框可随时切换，切换即写回这里。"
+  },
   "rag": {
     "high_confidence_threshold": 0.5,
     "intent_llm": {

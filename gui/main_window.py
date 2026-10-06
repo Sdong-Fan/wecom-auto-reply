@@ -25,6 +25,33 @@ from gui.theme import (COLORS, SPACE, apply_theme, detect_dpi_scale, font, px,
 logger = logging.getLogger(__name__)
 
 
+# ── 窗口置顶（可在界面底部一键切，写回 config.json）──────────────────────
+#
+# 2026-10-06 店主反馈："软件好像强制置顶在所有页面前面了，可以改吗"。
+# 原来是硬编码 `self.root.attributes('-topmost', True)` —— 没开关、没注释、
+# 想不置顶只能改代码。置顶对"盯着待人工"有用，但一直压着别的窗口很烦，
+# 所以：**默认不置顶**，底部一个勾选框随时切。
+#
+# 抽成模块级函数是为了能单测（写配置这件事很容易写错，
+# 而写错的后果是"界面显示置顶、其实没生效"或者反过来）。
+
+def always_on_top_enabled() -> bool:
+    """读窗口置顶开关。**默认 False** —— 不主动压别人的窗口。"""
+    try:
+        from config.settings_store import load_config
+        return bool((load_config() or {}).get("ui", {}).get("always_on_top", False))
+    except Exception:
+        return False
+
+
+def set_always_on_top(want: bool) -> None:
+    """把置顶开关写回 config.json（重启也记得）。"""
+    from config.settings_store import load_config, save_config
+    cfg = load_config() or {}
+    cfg.setdefault("ui", {})["always_on_top"] = bool(want)
+    save_config(cfg)
+
+
 class MessageRecord:
     """消息记录"""
 
@@ -48,7 +75,6 @@ class MessageRecord:
 
 class MainWindow:
     """主控窗口"""
-
     def __init__(self, on_pause: Callable = None, on_resume: Callable = None,
                  on_settings: Callable = None, on_kb: Callable = None,
                  on_dashboard: Callable = None, can_start: Callable = None):
@@ -100,7 +126,9 @@ class MainWindow:
         # 先给个大致位置（建控件期间别在屏幕角落闪）
         sw = self.root.winfo_screenwidth()
         self.root.geometry(f"{px(760)}x{px(320)}+{max(0, sw - px(780))}+{px(10)}")
-        self.root.attributes('-topmost', True)
+        # 置顶由配置决定（默认不置顶）—— 以前这里硬编码 True，想关只能改代码。
+        # 底部「窗口置顶」勾选框可以随时切，见 _create_footer / _toggle_topmost。
+        self.root.attributes('-topmost', always_on_top_enabled())
         # ★ 最小尺寸：以前没设，用户可以把窗口拖到 600px 以下，
         #   那时横幅、标签页、表格会互相盖住（用户反馈改窗口大小就盖住按钮）
         self.root.minsize(px(680), px(420))
@@ -484,6 +512,31 @@ class MainWindow:
                    command=self._export_csv).pack(side=tk.LEFT)
         ttk.Button(footer, text="清空", style="Ghost.TButton",
                    command=self._clear_records).pack(side=tk.LEFT, padx=(SPACE["xs"], 0))
+
+        # ★ 窗口置顶开关（2026-10-06 店主反馈"软件强制置顶在所有页面前面"）。
+        #   原来是硬编码 `attributes('-topmost', True)` —— 想不置顶只能改代码。
+        #   现在：默认**不置顶**，这里一键开/关，写回 config.json 重启也记得。
+        #   留在底部是因为它在所有标签页都可见（设置页翻起来麻烦）。
+        self._topmost_on = tk.BooleanVar(value=always_on_top_enabled())
+        ttk.Checkbutton(footer, text="窗口置顶", variable=self._topmost_on,
+                        command=self._toggle_topmost).pack(side=tk.RIGHT)
+
+    def _toggle_topmost(self):
+        """勾/取消置顶 → 立刻生效 + 写回配置。
+
+        写盘失败就把勾选状态改回去 —— 不让界面显示一个假的"已置顶"。
+        """
+        want = bool(self._topmost_on.get())
+        try:
+            set_always_on_top(want)
+        except Exception as e:
+            self._topmost_on.set(not want)
+            logger.warning("置顶设置写回失败: %s", e)
+            return
+        try:
+            self.root.attributes("-topmost", want)
+        except Exception as e:
+            logger.warning("应用置顶失败: %s", e)
 
 
     def _start_allowed(self):

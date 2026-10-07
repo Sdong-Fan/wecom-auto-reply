@@ -78,7 +78,10 @@ class MessageDetector:
         # 要么重复回（短窗口拦不住重启后重读的旧气泡）。
         self._replied_seen: dict = {}
         self._cooldown = self._cfg.get("reply_cooldown_seconds", 10)
-        self._msg_dedup_sec = self._cfg.get("message_dedup_seconds", 300)
+        # ★ 默认值本身就该是"安全值"：调用方只给了 `{"state_dir": ...}` 之类的
+        #   局部配置时，用的是这里的默认 —— 实测配置里改成 120、但默认还留着 300/600，
+        #   于是同一句话 147 秒后又被吞掉。两个窗口一起降（见下面那段注释）。
+        self._msg_dedup_sec = self._cfg.get("message_dedup_seconds", 120)
         # 「这条已经回过」要**落盘**且记得久一点。原来只存在内存里、只有 5 分钟：
         # 实测 21:45 回过一句，21:59（中途重启过程序）又把同一段气泡读成"未回复"，
         # 于是同一句话回了客户两遍 —— 店主看到的就是"这个问题明明已经回过了"。
@@ -89,7 +92,15 @@ class MessageDetector:
         # 会漏答 —— 客户 10:00 问"有货吗"、11:00 又问一次同样的话，会被判成
         # "已经回过"→ 一声不吭。漏答比重复回严重得多。
         # 短窗口只用来防"同一轮/相邻轮重复处理同一个气泡"。
-        self._unreplied_dedup_sec = self._cfg.get("unreplied_dedup_seconds", 600)
+        #
+        # ★ 2026-10-07 600→120：实测客户 18:06 问「索尼zve10有吗」、18:08 又发一遍
+        #   （147 秒后），被 600 秒窗口判成"回过"→ **一声不吭**；而那个气泡
+        #   **结构上明明是未回复的**（在最新蓝泡之下），是文字去重把它盖住了。
+        #   OCR 抖动/同一轮扫描内的重复是**秒级**的 —— 120 秒绰绰有余，
+        #   600 秒却会把"客户又问一遍"一起吞掉（漏答比重复回严重得多）。
+        #   注意：光降这一个不够，模糊那层（`_msg_dedup_sec`）也得降，否则
+        #   147 < 300 还会被它拦住。
+        self._unreplied_dedup_sec = self._cfg.get("unreplied_dedup_seconds", 120)
         state = self._cfg.get("state_dir", "data/state")
         self._seen_path = Path(state) / "seen_messages.json"
         self._seen_saved_at = 0.0

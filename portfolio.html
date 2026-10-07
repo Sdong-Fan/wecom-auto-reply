@@ -29,15 +29,26 @@
              padding:10px 12px; background:#fafcfa; }
   .kpi b { display:block; font-size:20px; color:var(--green); }
   .kpi span { font-size:12px; color:var(--gray); }
+  video.demo { width:100%; display:block; border:1px solid var(--line); border-radius:6px;
+               background:#000; margin:10px 0 6px; }
+  .cap { font-size:13px; color:var(--gray); margin:0 0 4px; }
   footer { margin-top:36px; padding-top:14px; border-top:1px solid var(--line);
            color:var(--gray); font-size:13px; }
-  @media print { body { padding:0; } h2 { page-break-after:avoid; } .noprint { display:none; } }
+  @media print { body { padding:0; } h2 { page-break-after:avoid; } .noprint { display:none; }
+                 video.demo { display:none; } }
 </style>
 </head>
 <body>
 
 <h1>企业微信自动客服机器人 · 作品集</h1>
 <p class="sub">产品负责人 / 改造开发 ｜ 个人作品 ｜ 基于开源项目（MIT 许可）改造 ｜ Windows 桌面端</p>
+
+<h2>产品演示（2 分 22 秒）</h2>
+<video class="demo" controls preload="metadata" playsinline>
+  <source src="demo.mp4" type="video/mp4">
+  你的浏览器不支持视频标签，<a href="demo.mp4">点这里下载演示视频</a>。
+</video>
+<p class="cap">演示内容：填模型接口 → 上传业务资料 → 看板看它今天做了什么 → 客户问「索尼 zve10 多少钱」它按资料库直接答。</p>
 
 <div class="kpi">
   <div><b>1.5 秒</b><span>首次响应中位（人工客服通常几十秒起）</span></div>

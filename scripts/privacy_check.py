@@ -132,7 +132,11 @@ def extra_needles() -> list:
     except OSError:
         pass
     return out
-BINARY_SUFFIX = {".exe", ".pyd", ".dll", ".bin", ".dat", ".pkg"}
+BINARY_SUFFIX = {".exe", ".pyd", ".dll", ".bin", ".dat", ".pkg",
+                 # ★ 资料库索引是 sqlite：里面的条目（含"学习"学到的真实对话）
+                 #   是打包**要发出去**的内容。只按文本后缀扫会整块漏掉它 ——
+                 #   之前就漏了：data/qdrant/.../storage.sqlite 从来没被查过内容。
+                 ".sqlite", ".sqlite3", ".db"}
 
 
 def _mask(s: str) -> str:

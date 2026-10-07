@@ -200,3 +200,19 @@ def test_binary_scan_finds_needle(tmp_path):
     p.write_bytes(b"\x00" * 100 + b"UfKoc" + b"\x00" * 100)
     bad = pc.check_binary(tmp_path)
     assert bad and "二进制" in bad[0][0]
+
+
+def test_kb_sqlite_is_content_scanned(tmp_path, monkeypatch):
+    """★ 资料库索引（sqlite）是**要发出去**的内容，必须按字节扫。
+
+    漏洞：`.sqlite` 既不在文本后缀也不在二进制后缀里，
+    于是 dist 里那份 knowledge_base 从来没被查过 ——
+    "学习"功能把真实对话学进索引，正好走这条路出去。
+    """
+    monkeypatch.setattr(pc, "NEEDLE_FILE", tmp_path / ".privacy_needles")
+    (tmp_path / ".privacy_needles").write_text("张三\n", encoding="utf-8")
+    p = tmp_path / "data/qdrant/collection/knowledge_base/storage.sqlite"
+    p.parent.mkdir(parents=True)
+    p.write_bytes(b"SQLite format 3\x00" + "客户：张三 电话".encode("utf-8"))
+    bad = pc.check_binary(tmp_path)
+    assert bad and bad[0][1].endswith("storage.sqlite"), bad

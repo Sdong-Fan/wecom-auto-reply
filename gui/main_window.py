@@ -757,18 +757,8 @@ class MainWindow:
 
     def _on_close(self):
         """关闭窗口"""
-        import traceback
         import logging as _log
         if messagebox.askyesno("退出", "确定要退出吗？"):
-            _stack = ''.join(traceback.format_stack())
-            _log.getLogger(__name__).info(
-                f"_on_close 被调用，调用栈:\n{_stack}")
-            try:
-                with open("logs/close_trace.log", "a", encoding="utf-8") as _f:
-                    _f.write(f"\n=== _on_close called ===\n{_stack}\n")
-                    _f.flush()
-            except Exception:
-                pass
             self._should_exit = True
             _log.getLogger(__name__).info("_on_close: 用户确认退出")
             self.root.destroy()

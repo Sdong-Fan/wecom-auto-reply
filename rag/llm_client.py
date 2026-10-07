@@ -69,7 +69,7 @@ def resolve_config() -> Tuple[str, str, str]:
 
     ★ **示例占位符一律当作"没填"**：第一次启动时 .env 是 .env.example 复制来的，
     里面 ``DEEPSEEK_API_KEY=sk-your-deepseek-key`` 看着像密钥，拿它去调接口只会拿 401。
-    当成没填 → 走"不填 Key 也能开"的既定设计（只转人工、不外发任何内容）。
+    当成没填 → 界面上密钥框留空、点「开始」会被拦下（提示去「设置」填真 Key）。
     """
     key = _raw_key()
     if _is_placeholder(key):

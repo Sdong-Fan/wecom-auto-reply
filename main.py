@@ -433,9 +433,13 @@ def _main_impl():
             responder.log_send_result(customer_name, reply_text, send_ok,
                                       **(log_ctx or {}))
             if send_ok:
+                # ★ 这是**唯一**的发送出口（自动回复、占位语、欢迎语、人工代发都走
+                #   这条队列），所以在这里记一笔就能覆盖"软件发出去的所有消息"。
+                #   「消息」列放**发出去的原文** —— 店主看这一页就是想看"它替我发了啥"，
+                #   原来传的是空串，那一列永远空白（2026-10-06 修）。
                 root.after(0,
                     lambda: window.add_record(
-                        customer_name, "", "replied", reply_text))
+                        customer_name, reply_text, "replied", reply_text))
                 # ★ 学习挂在"真的发出去"之后：没发出去的话不该被学走
                 if learn_ctx:
                     if learn_ctx.get("direct_confirm"):

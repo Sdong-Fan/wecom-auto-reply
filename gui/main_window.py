@@ -52,6 +52,57 @@ def set_always_on_top(want: bool) -> None:
     save_config(cfg)
 
 
+# ── 「已回复」= 软件**发出去**的消息 ────────────────────────────────────
+# 语义要写死在这里，别散落在过滤条件里：占位语、欢迎语都是真发出去的，
+# 客户收到了它们 —— 只把 auto_send 算"已回复"是错的（2026-10-06 修）。
+OUTBOUND_ACTIONS = frozenset({"replied", "auto_send", "hold", "greeting"})
+
+
+def load_reply_history(path=None, limit: int = 500) -> List["MessageRecord"]:
+    """从 `logs/auto_replies.jsonl` 读回"软件发过什么"。
+
+    为什么需要：`self._records` 只在内存里，**一重启就全没了** —— 店主重启几次
+    之后打开「已回复」是空的，会以为功能坏了（他确实这么反馈的："为什么全部和
+    已回复不会有消息"）。而这个 jsonl 是落盘的，每次发送都写，所以直接从它读。
+
+    返回**按时间先后**排的记录（跟 `add_record` 追加的顺序一致）；
+    显示时由 `_refresh_list` 倒过来（最新在上）。
+    文件没有/读不动就返回空列表（不抛）。
+    """
+    import json
+    from pathlib import Path as _P
+    p = _P(path) if path else _P("logs") / "auto_replies.jsonl"
+    if not p.exists():
+        return []
+    out: List[MessageRecord] = []
+    try:
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return []
+    for line in lines[-limit:]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        sent = (row.get("ai_reply") or "").strip()
+        if not sent:
+            continue                      # 没发出去的不算"已回复"
+        ts = str(row.get("timestamp") or "")
+        # 2026-09-22T14:57:03 → 09-22 14:57（**带日期**：历史跨很多天，
+        # 光看 HH:MM 根本不知道是哪天发的）
+        hhmm = (ts[5:10] + " " + ts[11:16]) if len(ts) >= 16 else ts[:5]
+        level = row.get("dispatch_level") or ""
+        action = "hold" if "占位" in str(row.get("guard_reason") or "") else "replied"
+        if level == "no_reply":
+            continue
+        out.append(MessageRecord(hhmm, row.get("customer_name") or "客户",
+                                 sent, action, sent))
+    return out
+
+
 class MessageRecord:
     """消息记录"""
 
@@ -90,7 +141,14 @@ class MainWindow:
         #   没配模型接口时不许开始 —— 否则机器人答不了业务问题，却照样回客户
         #   "稍等，我帮您确认一下"；没人处理「待人工」就等于替店主许了个空头承诺。
         self.can_start = can_start
-        self._records: List[MessageRecord] = []
+        # ★ 「已回复」列表的初始内容从落盘日志读回来（最新在前）。
+        #   原来这里只是个空列表，**重启就清空** —— 店主重启几次后打开
+        #   「已回复」什么都没有，以为功能坏了（"为什么全部和已回复不会有消息"）。
+        #   读不动就当空表，不影响启动。
+        try:
+            self._records: List[MessageRecord] = load_reply_history()
+        except Exception:
+            self._records = []
         # 默认**未启动**：打开程序不会自动开始扫描/回复，先让用户确认配置再点「开始」。
         # 已有的暂停机制本来就同时挡住两条通道（截图扫描与 API 轮询），所以直接复用。
         # 想开机就跑（或脚本化启动）：设环境变量 WECOM_AUTOSTART=1。
@@ -420,7 +478,12 @@ class MainWindow:
         tab_bar.pack(fill=tk.X)
 
         self._tab_buttons = {}
-        tabs = ["全部", "已回复", "待人工"]
+        # ★ 2026-10-06 店主："取消全部这一栏，只需要两个格子" ——
+        #   ① 待人工（功能同原来，放第一个，默认打开）
+        #   ② 已回复（**软件发出去的所有消息 + 时间**）
+        #   原来的「全部」被去掉了：它和「已回复」在功能上重叠，
+        #   而店主真正要看的就是"该我处理的有哪些"和"它替我发了什么"。
+        tabs = ["待人工", "已回复"]
         for tab in tabs:
             btn = ttk.Button(
                 tab_bar, text=tab, style="Segment.TButton",
@@ -429,10 +492,10 @@ class MainWindow:
             btn.pack(side=tk.LEFT, padx=(0, SPACE["xs"]))
             self._tab_buttons[tab] = btn
 
-        self._current_tab = "全部"
-        # 初始化时也要点亮一次选中态，否则一进来三个标签看着都"没选中"
+        self._current_tab = "待人工"
+        # 初始化时也要点亮一次选中态，否则一进来两个标签看着都"没选中"
         for name, b in self._tab_buttons.items():
-            b.configure(style="SegmentOn.TButton" if name == "全部"
+            b.configure(style="SegmentOn.TButton" if name == self._current_tab
                         else "Segment.TButton")
 
         # ── message list treeview ──────────────────────────────────
@@ -446,7 +509,7 @@ class MainWindow:
         self._tree.heading("customer", text="客户")
         self._tree.heading("message", text="消息")
         self._tree.heading("action", text="处理结果")
-        self._tree.column("time", width=80)
+        self._tree.column("time", width=110)
         self._tree.column("customer", width=120)
         self._tree.column("message", width=300)
         self._tree.column("action", width=100)
@@ -501,7 +564,11 @@ class MainWindow:
         self._pending_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         p_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self._pending_frame.pack_forget()  # 默认隐藏
+        self._pending_frame.pack_forget()  # 先隐藏，下面按当前标签显示
+
+        # ★ 默认标签是「待人工」，所以**必须同步一次视图** ——
+        #   否则会出现"高亮在待人工、显示的却是列表"这种自相矛盾的初始状态。
+        self._switch_tab(self._current_tab)
 
     def _create_footer(self):
         """创建底部按钮"""
@@ -609,19 +676,23 @@ class MainWindow:
             self._refresh_list()
 
     def _refresh_list(self):
-        """刷新消息列表"""
-        # 清空
+        """刷新「已回复」列表 —— **软件发出去的所有消息**（含占位语/欢迎语）。
+
+        ★ 2026-10-06 修：原来过滤条件是 `action == "replied"`，
+        看似能用（自动发送那条记录确实传 "replied"），但它漏掉了：
+          · 占位语（`hold`）—— 客户收到的就是这句，凭什么不算"已回复"；
+          · 欢迎语（`greeting`）；
+          · 以及任何将来新增的发送类型，一加就得记得回来改这里。
+        现在用**显式的"发出去"集合**，语义写清楚。
+        另外记录顺序改成**最新在上** —— 这是一个"它替我发了什么"的流水账，
+        往下滚找最新一条很别扭。
+        """
         for item in self._tree.get_children():
             self._tree.delete(item)
 
-        # 过滤
-        filtered = self._records
-        if self._current_tab == "已回复":
-            filtered = [r for r in filtered if r.action == "replied"]
+        filtered = [r for r in self._records if r.action in OUTBOUND_ACTIONS]
 
-        # 添加
-        for record in filtered:
-            tag = record.action
+        for record in reversed(filtered):        # 最新在上
             self._tree.insert(
                 "", tk.END,
                 values=(
@@ -630,7 +701,7 @@ class MainWindow:
                     record.message[:50] + ("..." if len(record.message) > 50 else ""),
                     self._get_action_text(record.action),
                 ),
-                tags=(tag,),
+                tags=(record.action,),
             )
 
     def _get_action_text(self, action: str) -> str:
@@ -709,7 +780,8 @@ class MainWindow:
     def add_record(self, customer: str, message: str, action: str,
                    reply: str = ""):
         """添加消息记录"""
-        timestamp = datetime.now().strftime("%H:%M")
+        # 带日期：这一页是"它替我发了什么"的流水账，跨天只写 HH:MM 分不清是哪天
+        timestamp = datetime.now().strftime("%m-%d %H:%M")
         record = MessageRecord(timestamp, customer, message, action, reply)
         self._records.append(record)
 

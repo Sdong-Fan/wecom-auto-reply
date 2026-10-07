@@ -35,7 +35,10 @@ def _llm(monkeypatch, payload):
 
 def test_parse_plain_json():
     got = learn._parse_analysis('{"style_rules":["句子短"],"tone_sample":"好嘞","facts":[]}')
-    assert got == {"style_rules": ["句子短"], "tone_sample": "好嘞", "facts": []}
+    # `fact_question` 是 2026-10-07 加的（通用问法，不许照抄客户原话 ——
+    # 见 test_learn_switch.py 里那条"学了但检索不到"的回归）。模型没给就是空串。
+    assert got == {"style_rules": ["句子短"], "tone_sample": "好嘞",
+                   "facts": [], "fact_question": ""}
 
 
 def test_parse_json_inside_markdown():

@@ -97,3 +97,47 @@ def test_paging_is_stable_across_calls(client):
     a = [e["id"] for e in kb_tools.list_entries(client, "knowledge_base", 0, 5)]
     b = [e["id"] for e in kb_tools.list_entries(client, "knowledge_base", 0, 5)]
     assert a == b
+
+
+# ── 关键词搜索：必须**全库**找，不能只看当前页 ────────────────────────
+
+def test_search_finds_entries_outside_the_first_page(client):
+    """★ 回归「资料库里找不到」：条目在第 3 页，在第 1 页搜也得搜得到。
+
+    原来搜索只在"取回的那一页"里过滤 —— 新学到的条目排在最后一页，
+    用户在默认第 1 页搜什么都搜不到，看起来就像"资料库里没有这条"
+    （实测搜 zve10：第 1 页 0 条、第 2 页 3 条）。
+    """
+    _fill(client, 25)
+    # 「问题024」在 offset=20 起的那一页
+    rows, total = kb_tools.search_entries(client, "knowledge_base", "问题024",
+                                          offset=0, limit=10)
+    assert total == 1, "全库搜索应当命中 1 条（不管它在第几页）"
+    assert len(rows) == 1 and "问题024" in rows[0]["text"]
+
+
+def test_list_entries_with_keyword_is_global(client):
+    """`list_entries(keyword=...)` 也要走全库搜索（界面用的就是它）。"""
+    _fill(client, 25)
+    got = kb_tools.list_entries(client, "knowledge_base", offset=0, limit=10,
+                                keyword="问题024")
+    assert len(got) == 1 and "问题024" in got[0]["text"]
+
+
+def test_search_reports_total_hits(client):
+    """命中总数要报出来（界面显示"命中 N 条"）——否则用户不知道翻页还有没有。"""
+    _fill(client, 12)
+    rows, total = kb_tools.search_entries(client, "knowledge_base", "问题00",
+                                          offset=0, limit=5)
+    assert total == 10          # 问题000..问题009
+    assert len(rows) == 5
+    page2, total2 = kb_tools.search_entries(client, "knowledge_base", "问题00",
+                                            offset=5, limit=5)
+    assert total2 == 10 and len(page2) == 5
+    assert {r["id"] for r in rows} & {r["id"] for r in page2} == set()
+
+
+def test_search_no_hit_is_empty_not_error(client):
+    _fill(client, 5)
+    rows, total = kb_tools.search_entries(client, "knowledge_base", "不存在的词")
+    assert rows == [] and total == 0

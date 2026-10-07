@@ -111,3 +111,50 @@ def test_set_learn_enabled_keeps_other_config(tmp_path, monkeypatch):
     assert got["kb"]["learn"]["max_items"] == 33, "别把 max_items 冲掉"
     assert got["kb"]["history_versions"] == 5
     assert got["rag"]["high_confidence_threshold"] == 0.5
+
+
+# ── 学到的东西要"能检索到"：问题不能照抄客户原话 ──────────────────────
+
+def test_parse_analysis_keeps_fact_question():
+    """★ 分析输出里的通用问法**不许丢**。
+
+    2026-10-07 实测：店主把草稿改成「索尼zve10售价5000，日租80，租期3天起」发出去，
+    学出来的 3 条长这样：
+        客户问题: 我就要zve10，你们客服说有，你去查一下
+        销售回答: 日租80
+    问题里全是那场对话特有的上下文、答案还是个碎片 ——
+    客户正常问「索尼zve10多少钱」**一条都检索不到**（top1 是别的机型）。
+    """
+    from rag.learn import _parse_analysis
+    got = _parse_analysis('{"facts": ["索尼 zve10：售价 5000 元"], '
+                          '"fact_question": "索尼zve10多少钱一天"}')
+    assert got is not None
+    assert got["fact_question"] == "索尼zve10多少钱一天"
+
+
+def test_propose_prefers_the_general_question(monkeypatch, tmp_path):
+    """propose 要用**通用问法**当问题，而不是照抄客户原话。"""
+    from rag import learn
+    monkeypatch.setattr(learn, "analyze", lambda *a, **k: {
+        "style_rules": [], "tone_sample": "",
+        "facts": ["索尼 zve10：售价 5000 元，日租 80 元，租期 3 天起"],
+        "fact_question": "索尼zve10多少钱一天"})
+    p = learn.propose("我就要zve10，你们客服说有，你去查一下",
+                      "AI 草稿内容", "索尼zve10售价5000，日租80，租期3天起",
+                      cfg={"kb": {"learn": {"enabled": True}}}, base=tmp_path)
+    assert p["ok"] is True
+    assert p["facts"], p
+    assert p["facts"][0]["question"] == "索尼zve10多少钱一天"
+    assert "客服说有" not in p["facts"][0]["question"]
+
+
+def test_prompt_demands_merged_facts_and_general_question():
+    """提示词必须**明确要求**：参数合并成一条 + 给通用问法。
+
+    这两条是 2026-10-07 那 3 条碎片学到的直接教训 ——
+    模型不照着做，学到的东西就是检索不到的废物。
+    """
+    from rag.learn import ANALYZE_SYSTEM
+    assert "fact_question" in ANALYZE_SYSTEM
+    assert "合成一条" in ANALYZE_SYSTEM, "要明确要求同一件事的参数合并成一条"
+    assert "不要照抄客户原话" in ANALYZE_SYSTEM

@@ -798,13 +798,22 @@ class KbDialog:
         page = max(0, int(page))
         size = 100
         kw = self._kb_kw.get().strip()
-        rows = kb_tools.list_entries(self.qdrant, self.collection,
-                                     offset=page * size, limit=size, keyword=kw)
+        # ★ 有关键词时走**全库搜索**（`search_entries`：全扫再分页）。
+        #   原来是在"当前页"里过滤 —— 新学到的条目排在最后一页，
+        #   用户在默认第 1 页搜什么都搜不到（实测搜 zve10：第 1 页 0 条、
+        #   第 2 页 3 条），看起来就像"资料库里没有这条"。
+        hit_total = None
+        if kw:
+            rows, hit_total = kb_tools.search_entries(
+                self.qdrant, self.collection, kw, offset=page * size, limit=size)
+        else:
+            rows = kb_tools.list_entries(self.qdrant, self.collection,
+                                         offset=page * size, limit=size)
         # ★ 翻过界时（点「下一页」越过最后一页）**不要显示空白页** ——
         #   空白页看起来就像"翻页坏了"（店主反馈过"上一页下一页是假的"）。
-        #   停回上一页并明说。带关键词过滤时不回退：那一页空可能只是都被滤掉了。
+        #   停回上一页并明说。搜索时不回退：下一页空就是真的没有更多命中。
         over = False
-        if not rows and page > 0 and not kw:
+        if not rows and page > 0 and hit_total is None:
             page -= 1
             over = True
             rows = kb_tools.list_entries(self.qdrant, self.collection,
@@ -823,11 +832,15 @@ class KbDialog:
             key = self._kb_tree.insert("", tk.END, tags=tag,
                                        values=(page * size + n, q, a))
             self._kb_rows[key] = r
-        total = kb_tools.count(self.qdrant, self.collection)
-        self._kb_info.config(
-            text=f"共 {total} 条 | 第 {page + 1} 页显示 {len(rows)} 条"
-                 + ("（已按关键词过滤本页）" if kw else "")
-                 + ("　← 已经是最后一页了" if over else ""))
+        if kw:
+            self._kb_info.config(
+                text=f"搜索「{kw}」命中 {hit_total} 条（全库搜索）| "
+                     f"第 {page + 1} 页显示 {len(rows)} 条")
+        else:
+            total = kb_tools.count(self.qdrant, self.collection)
+            self._kb_info.config(
+                text=f"共 {total} 条 | 第 {page + 1} 页显示 {len(rows)} 条"
+                     + ("　← 已经是最后一页了" if over else ""))
 
     # ── 试问一句页 ────────────────────────────────────────────────────
 

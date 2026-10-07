@@ -79,24 +79,60 @@ def _entry(point) -> dict:
             "faq": bool(q), "source": str(src or "")}
 
 
+def _scroll_all(client, collection: str, cap: int = 20000) -> List:
+    """把整个 collection 的 point 拉回来（游标翻完）。本地库就几百条，够用。"""
+    pts, cursor = [], None
+    while True:
+        batch, cursor = client.scroll(collection_name=collection, limit=256,
+                                      offset=cursor, with_payload=True,
+                                      with_vectors=False)
+        if not batch:
+            break
+        pts.extend(batch)
+        if cursor is None or len(pts) >= cap:
+            break
+    return pts
+
+
+def search_entries(client, collection: str = None, keyword: str = "",
+                   offset: int = 0, limit: int = 100):
+    """关键词搜索 → ``(本页条目, 命中总数)``。
+
+    ★ 2026-10-06 修「资料库里找不到」：
+    原来搜索是在**取回的那一页**里过滤的 —— 新学到的条目排在最后一页，
+    用户在默认的第 1 页搜什么都搜不到（实测搜 `zve10`：第 1 页 0 条、
+    第 2 页 3 条），看起来就像"资料库里没有这条"。
+    本地库才几百条，**全扫一遍再分页**毫无压力，别让用户以为"搜不到＝不存在"。
+    """
+    collection = _col(collection)
+    kw = (keyword or "").strip()
+    if not kw:
+        return [], 0
+    hits = [e for e in (_entry(p) for p in _scroll_all(client, collection))
+            if kw in e["text"]]
+    start = max(0, int(offset))
+    return hits[start:start + max(1, int(limit))], len(hits)
+
+
 def list_entries(client, collection: str = None, offset: int = 0,
                  limit: int = 100, keyword: str = "") -> List[dict]:
-    """翻页取条目。``keyword`` 给了就在**取回的这一页**里做文本过滤。
+    """翻页取条目。``keyword`` 给了就**全库搜**（见 `search_entries`）。
 
     ★ 2026-10-06 修「翻页是假的」：
     原来把数字 ``offset`` 直接传给 ``client.scroll(offset=...)`` ——
     但 Qdrant 的 scroll 是**游标分页**，那个参数要的是**上一页返回的
     ``next_page_offset``**（一个 point id），**不是数字偏移**。
     我们的 id 是 UUID，传 ``100`` 等于"从 id=100 这个点往后找"，
-    找不到就从头开始 —— 结果**每一页都返回同一批**，点上一页/下一页没任何变化。
-    （而且真正的游标 ``_next`` 原来被丢掉了。）
-
-    现在按游标逐页走到目标页：本地模式数据量小，翻到第 3 页也就 3 次 scroll。
+    找不到就从头开始 —— 结果**每一页都返回同一批**。
     """
     collection = _col(collection)
     limit = max(1, int(limit))
     want = max(0, int(offset))
     kw = (keyword or "").strip()
+    if kw:
+        rows, _total = search_entries(client, collection, kw,
+                                      offset=want, limit=limit)
+        return rows
     out: List[dict] = []
     try:
         cursor = None
@@ -118,10 +154,7 @@ def list_entries(client, collection: str = None, offset: int = 0,
         logger.warning(f"读取资料库失败: {e}")
         return out
     for p in points:
-        e = _entry(p)
-        if kw and kw not in e["text"]:
-            continue
-        out.append(e)
+        out.append(_entry(p))
     return out
 
 

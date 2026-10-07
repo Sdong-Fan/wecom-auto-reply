@@ -47,7 +47,8 @@ ANALYZE_SYSTEM = """你在帮一家摄影器材租赁店总结"店主自己是�
 {
   "style_rules": ["..."],
   "tone_sample": "...",
-  "facts": ["..."]
+  "facts": ["..."],
+  "fact_question": "..."
 }
 
 * **style_rules**：店主在**说话方式**上的习惯，**最多 2 条**，每条不超过 25 字。
@@ -59,7 +60,17 @@ ANALYZE_SYSTEM = """你在帮一家摄影器材租赁店总结"店主自己是�
   没有合适的就给空串 ""。
 * **facts**：终稿里**新出现的、关于店里的具体说法**（价格、时效、政策、库存、流程等），
   而且草稿和客户原话里都没有。只是换个说法不算 facts。
+  ★ **同一件事的几个参数必须合成一条**，不许拆开。例如终稿是
+  「索尼zve10售价5000，日租80，租期3天起」，要写成一条
+  「索尼 zve10：售价 5000 元，日租 80 元，租期 3 天起」，
+  **不要**拆成「索尼zve10售价5000」「日租80」「租期3天起」三条 ——
+  拆开之后每条都是残缺的，检索时都对不上，等于白学。
   没有就给空数组 []。
+* **fact_question**：**客户会怎么问**这件事 —— 要写成一句**通用的、别的客户也会问**的话，
+  例如「索尼zve10多少钱一天」。**绝对不要照抄客户原话**：客户原话往往带着
+  这场对话特有的上下文（"你们客服说有""你去查一下"），照抄之后
+  下次别人换个问法就检索不到，学到的知识等于没用。
+  没有 facts 就给空串 ""。
 
 铁律：不确定的一律不要写。宁可少写，也不要猜。"""
 
@@ -92,6 +103,9 @@ def _parse_analysis(raw: str) -> Optional[dict]:
         "style_rules": _list("style_rules", 2),
         "facts": _list("facts", 5),
         "tone_sample": str(data.get("tone_sample") or "").strip()[:200],
+        # ★ 通用问法：**别丢掉**。原来这里没带出来，于是 propose 只能拿客户原话
+        #   当问题，学到的条目检索不到（见 propose 里的说明）。
+        "fact_question": str(data.get("fact_question") or "").strip()[:200],
     }
 
 
@@ -277,11 +291,22 @@ def propose(question: str, draft: str, human: str, cfg: dict = None,
                            "already": bool(ls.find_tone(masked, base))}
 
         seen = " ".join(context_chunks or [])
+        # ★ 2026-10-06 修：问题**不再照抄客户原话**。
+        #   原来每条 fact 都挂 `question`（客户原话），实测学出来的条目长这样：
+        #       客户问题: 我就要zve10，你们客服说有，你去查一下
+        #       销售回答: 日租80
+        #   问题里全是那场对话特有的上下文，答案还是个碎片 ——
+        #   客户正常问「索尼zve10日租多少」根本检索不到（实测 top1 是别的机型）。
+        #   现在优先用模型给的**通用问法** `fact_question`；模型没给就退回客户原话
+        #   （至少不丢东西），但那种情况会记一条日志，方便发现模型没照做。
+        gen_q = (res.get("fact_question") or "").strip()
+        if not gen_q and res.get("facts"):
+            logger.info("改稿分析没给通用问法，退回客户原话当问题（检索命中率会低）")
         for i, claim in enumerate(res.get("facts", [])[:5]):
             if seen and ls.norm(claim) in ls.norm(seen):
                 continue          # 资料里已经有了，不算新知识
             out["facts"].append({"key": f"f{i}", "claim": claim,
-                                 "question": (question or "").strip()})
+                                 "question": gen_q or (question or "").strip()})
         out["ok"] = True
         return out
     except Exception as e:
